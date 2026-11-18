@@ -60,20 +60,16 @@ public final class RuntimeProbe {
 
     public static String describe() {
         StringBuilder sb = new StringBuilder();
-        sb.append(hasEngine() ? "✓ " : "✗ ").append("lib").append(ENGINE_LIB).append(".so（ArkUI 引擎 + 方舟运行时）\n");
-        sb.append(hasAdapter() ? "✓ " : "✗ ").append("ohos.stage.ability.adapter.*（Android 适配层）\n");
-        sb.append(hasHost() ? "✓ " : "✗ ").append("HapHostActivity（HAP 宿主 Activity）\n");
+        sb.append(hasEngine() ? "✓ " : "✗ ").append("渲染引擎（libarkui_android.so）\n");
+        sb.append(hasAdapter() ? "✓ " : "✗ ").append("系统适配层（ohos.stage.ability.adapter.*）\n");
+        sb.append(hasHost() ? "✓ " : "✗ ").append("宿主页面（HapHostActivity）\n");
         return sb.toString();
     }
 
     public static String missingHint() {
-        return "当前 APK 里没有 ArkUI-X 运行时，HAP 无法被“执行”。\n\n"
-                + "补齐方式（任选其一）：\n"
-                + "1) DevEco Studio → SDK Manager 安装 ArkUI-X SDK（需登录华为账号），\n"
-                + "   再执行 tools/arkuix/setup.ps1 -ArkuiXSdk <sdk路径> 重新打包；\n"
-                + "2) 用 ArkUI-X 源码（gitee.com/arkui-x）自行编译 Android 运行时；\n"
-                + "3) 使用已含运行时的第三方发行版，把 lib/ 与 adapter jar 塞进本工程重建。\n\n"
-                + "说明：HAP 不能像 APK 一样直接安装执行——Android 没有 ArkUI/方舟运行时，\n"
-                + "必须由宿主 App 内嵌 ArkUI-X 才能渲染 ArkTS 页面。";
+        return "当前是精简版，缺少运行应用所需的环境，只能查看和解包。\n\n"
+                + "如需运行：在打包机上接入 ArkUI-X SDK，用 build.ps1 带 -ArkuiXSdk 参数重新构建完整版；"
+                + "也可以自行编译运行时，或用已带运行时的第三方包替换原生库与适配层后重新打包。\n\n"
+                + "说明：.hap 不能像普通 APK 那样直接安装，必须由本运行器内置运行环境才能渲染页面。";
     }
 }

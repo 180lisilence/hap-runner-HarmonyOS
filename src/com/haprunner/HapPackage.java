@@ -28,6 +28,7 @@ public class HapPackage {
     public String pagesProfile = "-";
     public String deviceTypes = "-";
     public final List<String> abilities = new ArrayList<>();
+    public final List<String> extensionAbilities = new ArrayList<>();
     public final List<String> permissions = new ArrayList<>();
     public int entryCount = 0;
     public int mediaCount = 0;
@@ -42,21 +43,47 @@ public class HapPackage {
         return "fa".equals(model);
     }
 
+    /** 是否带可执行的 Stage 字节码 modules.abc */
+    public boolean hasAbc() {
+        return abcSize > 0;
+    }
+
+    /** 是否含可打开页面的页面 Ability */
+    public boolean hasPageAbility() {
+        return !abilities.isEmpty();
+    }
+
+    /** 是否为纯扩展包：只有 ExtensionAbility（后台服务/输入法/数据共享/卡片等），无页面 */
+    public boolean isExtOnly() {
+        return abilities.isEmpty() && !extensionAbilities.isEmpty();
+    }
+
+    /** HarmonyOS API 编码以 60000000 为基数（如 60000020 = API 20），与 Android SDK_INT 不是一套编号，不能直接比 */
+    private static final int HARMONY_API_BASE = 60000000;
+
     /** 兼容性判定：设备 API + 包自身声明 + 运行时状态 */
     public String compatVerdict(int deviceApi) {
         if (error != null && !error.isEmpty()) {
-            return "包无效：" + error;
+            return "无法识别：" + error;
         }
-        if (minApi > 0 && minApi > deviceApi) {
-            return "不兼容：HAP 要求 API " + minApi + "（本机 " + deviceApi + "）";
+        if (isFaModel()) {
+            return "旧版 FA 模型，手机端运行时不支持";
         }
-        if (deviceTypes != null && deviceTypes.contains("[") && !deviceTypes.contains("phone")) {
-            return "设备类型不匹配：" + deviceTypes;
+        if (!hasAbc()) {
+            return "缺少程序字节码（无 modules.abc），无法运行";
+        }
+        if (isExtOnly()) {
+            return "后台服务/扩展能力，没有可打开的页面";
+        }
+        // deviceTypes：default 为通用类型，phone/default 均视为可在手机运行
+        if (deviceTypes != null && deviceTypes.contains("[")
+                && !deviceTypes.contains("phone") && !deviceTypes.contains("default")) {
+            return "不支持在手机上运行";
         }
         if (!RuntimeProbe.isReady()) {
-            return "可解析 / 可解包：缺 ArkUI-X 运行时";
+            return "只能查看，不能运行（缺运行环境）";
         }
-        return "可运行";
+        return "可以运行";
     }
 
     public static HapPackage parse(File hap) {
@@ -97,7 +124,7 @@ public class HapPackage {
                 p.model = "fa";
                 p.fillFa(configJson);
             } else {
-                p.error = "包内既没有 module.json 也没有 config.json，不是合法 HAP";
+                p.error = "不是有效的 HarmonyOS 应用包";
             }
         } catch (Exception e) {
             p.error = "解析失败：" + e;
@@ -126,6 +153,12 @@ public class HapPackage {
                 if (ab != null) {
                     for (int i = 0; i < ab.length(); i++) {
                         abilities.add(ab.optJSONObject(i).optString("name"));
+                    }
+                }
+                org.json.JSONArray ext = mod.optJSONArray("extensionAbilities");
+                if (ext != null) {
+                    for (int i = 0; i < ext.length(); i++) {
+                        extensionAbilities.add(ext.optJSONObject(i).optString("name"));
                     }
                 }
                 org.json.JSONArray pm = mod.optJSONArray("requestPermissions");
@@ -184,14 +217,41 @@ public class HapPackage {
     }
 
     public String primaryAbility() {
-        return abilities.isEmpty() ? mainElement : abilities.get(0);
+        if (abilities.isEmpty()) {
+            return mainElement;
+        }
+        if (mainElement != null && !mainElement.isEmpty() && !"-".equals(mainElement)) {
+            for (String ab : abilities) {
+                if (mainElement.equals(ab) || shortName(mainElement).equals(shortName(ab))) {
+                    return ab;
+                }
+            }
+        }
+        return abilities.get(0);
+    }
+
+    /** 取全限定名最后一段（类名），用于短名归一匹配 */
+    private static String shortName(String name) {
+        if (name == null) {
+            return "";
+        }
+        int idx = name.lastIndexOf('.');
+        return idx >= 0 ? name.substring(idx + 1) : name;
     }
     public String instanceName() {
         return bundleName + ":" + moduleName + ":" + primaryAbility() + ":";
     }
 
     public String brief() {
-        return bundleName + "  ·  v" + versionName + "  ·  " + moduleName + "/" + primaryAbility();
+        return "v" + versionName + "  ·  " + (size / 1024) + " KB";
+    }
+
+    /** API 版本号显示：HarmonyOS 编码换算为 API level，否则按 Android API 显示 */
+    public String apiLabel(int v) {
+        if (v <= 0) {
+            return "-";
+        }
+        return v >= HARMONY_API_BASE ? "HarmonyOS API " + (v - HARMONY_API_BASE) : "Android API " + v;
     }
 
     // ---------------------------------------------------------------- utils
@@ -221,7 +281,9 @@ public class HapPackage {
             if (idx >= 0) {
                 for (int i = idx + 5; i < n && ver.length() < 12; i++) {
                     char c = (char) (head[i] & 0xff);
-                    if ((c >= '0' && c <= '9') || c == '.') {
+                    if (c >= '0' && c <= '9') {
+                        ver.append(c);
+                    } else if (c == '.' && ver.length() > 0) {
                         ver.append(c);
                     } else if (ver.length() > 0) {
                         break;
