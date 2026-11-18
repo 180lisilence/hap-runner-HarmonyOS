@@ -1,0 +1,18 @@
+# ---- 构建中间产物（build.ps1 每次构建重建）----
+/build/
+/dist/
+
+# ---- ArkUI-X SDK 装配产物（由 build.ps1 -ArkuiXSdk 从 SDK 拷贝，不入库）----
+/jniLibs/
+/libs/
+/assets/
+
+# ---- 调试签名密钥 ----
+/keys/
+
+# ---- IDE / 系统 ----
+.idea/
+.vscode/
+*.iml
+.cxx/
+*.log

@@ -1,0 +1,7 @@
+{
+  // 标记哪些模块参与 ArkUI-X 跨平台构建（Android / iOS）
+  "crossplatform": true,
+  "modules": [
+    "entry"
+  ]
+}

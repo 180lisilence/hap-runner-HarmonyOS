@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.haprunner"
+    android:versionCode="2"
+    android:versionName="1.1.0">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="31" />
+
+    <application
+        android:label="HAP 运行器"
+        android:icon="@drawable/ic_launcher"
+        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
+        android:debuggable="true" android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 从文件管理器「打开方式」直接送 HAP 进来 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="*/*" />
+                <data android:scheme="file" />
+            </intent-filter>
+        </activity>
+
+        <!-- 运行时齐备时由 build.ps1 -WithRuntime 一并编入 -->
+        <activity
+            android:name=".HapHostActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+    </application>
+</manifest>
+
+
+
+
+
