@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HAP Runner for HarmonyOS</title>
+  <style>
+    :root {
+      --bg: #0f1518;
+      --card: #1a2329;
+      --card-2: #222d34;
+      --text: #e8eef1;
+      --muted: #9db1ba;
+      --accent: #2dd4bf;
+      --border: #2c3941;
+      --code-bg: #0b1013;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.7;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+    header { padding: 64px 0 36px; text-align: center; }
+    .badge-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+    .badge { border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 3px 12px; font-size: 13px; }
+    h1 { font-size: 2.2rem; letter-spacing: .5px; }
+    .subtitle { color: var(--muted); margin-top: 12px; font-size: 1.05rem; }
+    .actions { margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn { display: inline-block; padding: 10px 20px; border-radius: 10px; text-decoration: none; font-size: 14px; }
+    .btn-primary { background: var(--accent); color: #06251f; font-weight: 600; }
+    .btn-ghost { border: 1px solid var(--border); color: var(--text); }
+    section { padding: 32px 0; }
+    h2 { font-size: 1.35rem; margin-bottom: 18px; border-left: 3px solid var(--accent); padding-left: 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+    .card h3 { font-size: 1rem; margin-bottom: 8px; color: var(--accent); }
+    .card p { color: var(--muted); font-size: 14px; }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .gallery figure { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .gallery img { width: 100%; display: block; }
+    .gallery figcaption { padding: 10px 14px; color: var(--muted); font-size: 13px; }
+    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px; padding: 16px; overflow-x: auto; }
+    code { font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; color: var(--text); }
+    .comment { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    td { color: var(--text); }
+    footer { padding: 32px 0 48px; color: var(--muted); font-size: 13px; text-align: center; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="badge-row">
+        <span class="badge">Android 宿主</span>
+        <span class="badge">ArkUI-X</span>
+        <span class="badge">命令行打包</span>
+        <span class="badge">com.haprunner 1.1.0</span>
+      </div>
+      <h1>HAP Runner for HarmonyOS</h1>
+      <p class="subtitle">在安卓手机上选择、解析、解包并运行 HarmonyOS 的 <code>.hap</code> 应用，页面经 ArkUI-X 运行时渲染。个人学习项目，与官方无关。</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/180lisilence/hap-runner-HarmonyOS">查看源码</a>
+        <a class="btn btn-ghost" href="https://github.com/180lisilence/heimayun-music-self">关联示例应用</a>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="wrap">
+      <h2>核心特性</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>选择与扫描</h3>
+          <p>手动挑选 .hap 文件，或扫描本地存储与已授权目录树；支持从文件管理器「打开方式」直接送入。</p>
+        </div>
+        <div class="card">
+          <h3>HAP 解析</h3>
+          <p>读取 module.json，判断应用模型与兼容级别，定位主 EntryAbility，生成实例名、摘要与 SHA-256。</p>
+        </div>
+        <div class="card">
+          <h3>解包装配</h3>
+          <p>将 HAP 条目解包成 ArkUI-X 的 assets/arkui-x/&lt;module&gt; 目录结构，交给运行时加载。</p>
+        </div>
+        <div class="card">
+          <h3>运行时探测</h3>
+          <p>检测方舟引擎 .so、Java 适配层与宿主 Activity 是否齐备；缺失时给出精确的缺项提示。</p>
+        </div>
+        <div class="card">
+          <h3>一键命令行打包</h3>
+          <p>aapt2 → javac → d8 → 资源/原生库/assets 拼装 → zipalign → apksigner，无需 Android Studio。</p>
+        </div>
+        <div class="card">
+          <h3>两种构建形态</h3>
+          <p>不带运行时的精简版（仅解析/解包），或接入 ArkUI-X 运行时的完整版（可真正渲染 ArkTS 页面）。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>界面截图</h2>
+      <div class="gallery">
+        <figure>
+          <img src="./shot_host.png" alt="宿主界面">
+          <figcaption>宿主主界面</figcaption>
+        </figure>
+        <figure>
+          <img src="./shot_runner.png" alt="运行器界面">
+          <figcaption>HAP 运行列表</figcaption>
+        </figure>
+        <figure>
+          <img src="./shot4.png" alt="运行器界面二">
+          <figcaption>运行状态</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>快速构建</h2>
+      <pre><code><span class="comment"># 普通构建（不含 ArkUI-X 运行时，仅解析 / 解包）</span>
+.\build.ps1
+
+<span class="comment"># 带 ArkUI-X 运行时构建，并安装到已连接设备</span>
+.\build.ps1 -ArkuiXSdk "&lt;ArkUI-X SDK 根目录&gt;" -Install
+
+<span class="comment"># 探测本机运行时是否齐备</span>
+.\build.ps1 -Probe</code></pre>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>构建环境</h2>
+      <table>
+        <tr><th>组件</th><th>说明</th></tr>
+        <tr><td>Android SDK</td><td>build-tools 35.0.0、platforms android-35</td></tr>
+        <tr><td>JDK</td><td>21，javac --release 8 编译</td></tr>
+        <tr><td>ArkUI-X SDK</td><td>可选；提供 adapter jar、libarkui_android.so、systemres 与插件库</td></tr>
+        <tr><td>设备兼容</td><td>minSdk 21 / targetSdk 31，arm64-v8a</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>个人学习项目，与 HarmonyOS / OpenHarmony 官方无关。</p>
+      <p style="margin-top:8px">源码见 <a href="https://github.com/180lisilence/hap-runner-HarmonyOS">180lisilence/hap-runner-HarmonyOS</a></p>
+    </div>
+  </footer>
+</body>
+</html>
