@@ -36,10 +36,6 @@
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
     .card h3 { font-size: 1rem; margin-bottom: 8px; color: var(--accent); }
     .card p { color: var(--muted); font-size: 14px; }
-    .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-    .gallery figure { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
-    .gallery img { width: 100%; display: block; }
-    .gallery figcaption { padding: 10px 14px; color: var(--muted); font-size: 13px; }
     pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px; padding: 16px; overflow-x: auto; }
     code { font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; color: var(--text); }
     .comment { color: var(--muted); }
@@ -97,26 +93,6 @@
           <h3>两种构建形态</h3>
           <p>不带运行时的精简版（仅解析/解包），或接入 ArkUI-X 运行时的完整版（可真正渲染 ArkTS 页面）。</p>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <h2>界面截图</h2>
-      <div class="gallery">
-        <figure>
-          <img src="./shot_host.png" alt="宿主界面">
-          <figcaption>宿主主界面</figcaption>
-        </figure>
-        <figure>
-          <img src="./shot_runner.png" alt="运行器界面">
-          <figcaption>HAP 运行列表</figcaption>
-        </figure>
-        <figure>
-          <img src="./shot4.png" alt="运行器界面二">
-          <figcaption>运行状态</figcaption>
-        </figure>
       </div>
     </div>
   </section>
