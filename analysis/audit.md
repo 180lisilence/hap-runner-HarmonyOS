@@ -223,7 +223,7 @@
 - **本地预言机复跑**：`hapcheck.ps1` 批量 8/8 与 `expected.txt` 对齐——legal-edge/legal-normal=OK，sec-bad-abi=ABI_MISSING，compat-bad-magic=BYTECODE_UNSUPPORTED（abc 魔数非 PANDA，老字节码占位），sec-bomb/too-many-entries/traversal-abs/traversal-dir=SECURITY_REJECTED。bad-magic 样本由 `make-security-samples.py` 新增 `compat-bad-magic.hap`（OLDABC 魔数）；设备 UI 弹窗仍受 MuMu 多屏 tap 阻塞，该码靠 Java 同序判定 + 预言机断言 + 代码审查覆盖。
 - **三处一致性核查**：ABI 四值（arm64-v8a/armeabi-v7a/armeabi/x86_64）与 PANDA 魔数在 Java 常量、`assets/compat/abi.json`、`bytecode.json`、`tools/hapcheck.ps1` 一致。已知差异：Java ABI 判定对照本机 `Build.SUPPORTED_ABIS`，离线 CLI 对照白名单；解耦 CLI 时改为外部注入（远期）。
 - **合法链路回归**：基准包直拉 `LaunchAbility EntryAbility`、`Ability onForeground` 正常，无 `invalid script buffer`；已知噪声（read file failed、GetAsset default.json/manifest.json）不致命。
-- **推送状态**：A 线 + #38 修复已提交 `8132e12` 并推 `origin/main`；本轮回滚加固（MainActivity +18）待提交。
+- **推送状态**：A 线 + #38 修复已提交 `8132e12` 并推 `origin/main`；回滚加固已提交 `c17bc5c`；编译核查台账 `0ef4a1b`；bad-magic 样本与 8/8 预言机对齐 `0c4747e`，均已推 `origin/main`，工作区干净。
 
 ### 11.9 #17 命令行编译可行性核查（2026-11-19 续）
 
