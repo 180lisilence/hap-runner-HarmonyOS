@@ -10,6 +10,7 @@ OUT = os.path.join(BASE, "analysis", "samples", "security")
 os.makedirs(OUT, exist_ok=True)
 
 PANDA_MAGIC = b"PANDA" + b"\x00" * 58  # 前 64 字节含 PANDA 魔数
+OLD_MAGIC = b"OLDABC" + b"\x00" * 59  # 非 PANDA 魔数：模拟老 fmt 字节码
 
 def minimal_module(name, abis=None):
     return {
@@ -23,12 +24,12 @@ def minimal_module(name, abis=None):
         },
     }
 
-def write_hap(path, entries, module=None, abi_so=None):
-    """entries: list of (name, bytes). abi_so: dict abi -> so bytes."""
+def write_hap(path, entries, module=None, abi_so=None, abc_bytes=PANDA_MAGIC):
+    """entries: list of (name, bytes). abi_so: dict abi -> so bytes. abc_bytes: modules.abc 内容。"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         if module is not None:
             z.writestr("module.json", json.dumps(module, ensure_ascii=False))
-            z.writestr("modules.abc", PANDA_MAGIC)
+            z.writestr("modules.abc", abc_bytes)
         if abi_so:
             for abi, data in abi_so.items():
                 z.writestr(f"libs/{abi}/libx.so", data)
@@ -62,6 +63,11 @@ manifest.append(("sec-bomb.hap", "SECURITY_REJECTED", "解压体积/压缩比超
 p = os.path.join(OUT, "sec-bad-abi.hap")
 write_hap(p, [], minimal_module("badabi"), abi_so={"mips": b"\x7fELF"})
 manifest.append(("sec-bad-abi.hap", "ABI_MISSING", "包内 ABI 不在白名单"))
+
+# 6) 老字节码：abc 存在但魔数非 PANDA -> BYTECODE_UNSUPPORTED（兼容判定）
+p = os.path.join(OUT, "compat-bad-magic.hap")
+write_hap(p, [], minimal_module("oldmagic"), abc_bytes=OLD_MAGIC)
+manifest.append(("compat-bad-magic.hap", "BYTECODE_UNSUPPORTED", "abc 魔数不在当前引擎支持列表"))
 
 # 合法对照：从现有 OK 样本复制
 samples_dir = os.path.join(BASE, "analysis", "samples")
