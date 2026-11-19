@@ -224,3 +224,13 @@
 - **三处一致性核查**：ABI 四值（arm64-v8a/armeabi-v7a/armeabi/x86_64）与 PANDA 魔数在 Java 常量、`assets/compat/abi.json`、`bytecode.json`、`tools/hapcheck.ps1` 一致。已知差异：Java ABI 判定对照本机 `Build.SUPPORTED_ABIS`，离线 CLI 对照白名单；解耦 CLI 时改为外部注入（远期）。
 - **合法链路回归**：基准包直拉 `LaunchAbility EntryAbility`、`Ability onForeground` 正常，无 `invalid script buffer`；已知噪声（read file failed、GetAsset default.json/manifest.json）不致命。
 - **推送状态**：A 线 + #38 修复已提交 `8132e12` 并推 `origin/main`；本轮回滚加固（MainActivity +18）待提交。
+
+### 11.9 #17 命令行编译可行性核查（2026-11-19 续）
+
+- **环境勘察**：DevEco Studio 261.23567.138.36.2600821 装于 `D:\TOOL\devecostudio\devecostudioapp\DevEco Studio`；`tools/` 下含 `hvigor/bin/hvigorw.bat`、`node/node.exe`(v24.14.1)、`ohpm/bin/ohpm.bat`、`llvm`、`arktsdoc`；SDK 在 `sdk/default/{hms,openharmony}`。
+- **编译试验**：复制 `E:\2026music` 到 `backup/crosscheck-app/`（排除 build/dist/.hvigor/backup/.idea），`AppScope/app.json5` bundleName 改为 `com.learn.crosscheck`，`local.properties` 配 `sdk.dir` 与 `arkui-x.dir`；设 `DEVECO_SDK_HOME=sdk/default`、`NODE_HOME=tools/node`，跑 `hvigorw assembleHap --mode module -p product=default --no-daemon`。
+- **阻塞点 1（SDK 版本识别）**：`00303312 Cannot find the corresponding SDK version under the specified SDK path`。内置 SDK 布局为 `sdk/default/{hms,openharmony}/ets...`，缺 hvigor 期望的版本号目录层。
+- **阻塞点 2（缺字节码编译器）**：`sdk/default/*/ets/build-tools` 仅含 `ets-loader`（组件映射）与 `ts-checker-hooks`（since/syscap 检查），`toolchains` 为 configcheck/modulecheck/paccheck/syscapcheck 与 hilogtool；全目录未找到 `es2abc`/ark compiler/abc 生成器。`tools/llvm` 仅 clangd/lldb 脚本，`tools/arktsdoc` 为文档生成器，`jbr` 为 Java 运行时。即内置 SDK 只含类型声明、loader 与检查工具，**不含 ArkTS→abc 编译器**，命令行编不出可加载的 modules.abc。
+- **结论**：#17 跨包端到端样本不能在本机命令行新编。需在装有完整 HarmonyOS SDK（含 es2abc/ark 编译器）的环境用 DevEco Studio 构建；跨包副本 `backup/crosscheck-app/` 已备好包名与配置，待编译器环境就位可直接 `assembleHap`。
+- **副本与日志**：`backup/crosscheck-app/`（gitignore，不入远程）；编译日志 `backup/crosscheck-app/build-crosscheck.log`。
+- **#17 双重阻塞维持**：① 真机 A2LV6R1A11001684 offline（物理连接/USB 授权/锁屏类，命令行不可强制上线）；② 本机缺 ArkTS→abc 编译器与匹配的 SDK 版本布局。模拟器侧链路（解包/隔离/判定/自举渲染）已验证。
