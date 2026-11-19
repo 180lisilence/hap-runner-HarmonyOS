@@ -25,7 +25,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -300,9 +303,10 @@ public class MainActivity extends Activity {
                 File local = ref.file != null ? store.importFile(ref.file) : store.importUri(ref.uri);
                 HapPackage pkg = HapPackage.parse(local);
                 unpack(pkg);
+                Verdict iv = pkg.computeVerdict();
                 Log.i(LOG, "scan-import " + local.getName() + " bundle=" + pkg.bundleName
                         + " module=" + pkg.moduleName + " ability=" + pkg.primaryAbility()
-                        + " verdict=" + pkg.compatVerdict(Build.VERSION.SDK_INT));
+                        + " verdict=" + iv.code + " " + iv.summary);
                 ui.post(() -> {
                     Toast.makeText(this, "已加入列表", Toast.LENGTH_SHORT).show();
                     refresh();
@@ -481,9 +485,9 @@ public class MainActivity extends Activity {
         LinearLayout box = card();
         box.addView(text(pkg.name, 15, TXT, true));
         box.addView(text(pkg.brief(), 12, SUB, false));
-        String verdict = pkg.compatVerdict(android.os.Build.VERSION.SDK_INT);
-        boolean canRun = verdict.equals("可以运行");
-        TextView verdictView = text(verdict, 12, canRun ? OK : WARN, false);
+        Verdict verdict = pkg.computeVerdict();
+        boolean canRun = verdict.isRunnable();
+        TextView verdictView = text(verdict.summary, 12, canRun ? OK : WARN, false);
         verdictView.setPadding(0, dp(4), 0, 0);
         box.addView(verdictView);
 
@@ -513,36 +517,17 @@ public class MainActivity extends Activity {
     }
 
     private void tryRun(HapPackage pkg) {
-        if (pkg.error != null && !pkg.error.isEmpty()) {
-            new AlertDialog.Builder(this).setTitle("无法运行").setMessage(pkg.error)
-                    .setPositiveButton("知道了", null).show();
-            return;
-        }
-        if (pkg.isFaModel()) {
-            new AlertDialog.Builder(this).setTitle("旧版 FA 模型，无法运行")
-                    .setMessage("这是基于 config.json 的旧版 FA（Feature Ability）包。\n"
-                            + "本机 ArkUI-X 运行时只支持 Stage 模型，且包内没有可执行字节码 modules.abc，无法在手机上拉起页面。")
-                    .setPositiveButton("知道了", null).show();
-            return;
-        }
-        if (!pkg.hasAbc()) {
-            new AlertDialog.Builder(this).setTitle("缺少程序字节码，无法运行")
-                    .setMessage("包内未找到 ets/modules.abc 编译产物，运行时没有可执行的 ArkTS 字节码。\n"
-                            + "请使用已编译打包的 Stage 模型 HAP。")
-                    .setPositiveButton("知道了", null).show();
-            return;
-        }
-        if (pkg.isExtOnly()) {
-            String exts = pkg.extensionAbilities.isEmpty() ? "-" : String.join("、", pkg.extensionAbilities);
-            new AlertDialog.Builder(this).setTitle("扩展服务，没有可打开的页面")
-                    .setMessage("这是后台服务/扩展能力（" + exts + "），"
-                            + "依赖系统服务或作为能力被其他应用调用，本身没有页面，不能在宿主里直接运行。")
-                    .setPositiveButton("知道了", null).show();
-            return;
-        }
-        if (!RuntimeProbe.isReady()) {
-            new AlertDialog.Builder(this).setTitle("缺少运行环境")
-                    .setMessage(RuntimeProbe.describe() + "\n" + RuntimeProbe.missingHint())
+        Verdict v = pkg.computeVerdict();
+        if (!v.isRunnable()) {
+            Log.i(LOG, "tryRun reject code=" + v.code + " pkg=" + pkg.name);
+            String msg = v.detail;
+            if (Verdict.RUNTIME_MISSING.equals(v.code)) {
+                msg = msg + "\n" + RuntimeProbe.describe();
+            }
+            msg = msg + "\n\n建议：" + v.advice;
+            new AlertDialog.Builder(this)
+                    .setTitle(v.level)
+                    .setMessage(msg)
                     .setPositiveButton("知道了", null).show();
             return;
         }
@@ -556,6 +541,13 @@ public class MainActivity extends Activity {
             i.putExtra("moduleName", pkg.moduleName);
             i.putExtra("hapPath", pkg.file != null ? pkg.file.getAbsolutePath() : null);
             startActivity(i);
+        } catch (SecurityReject sr) {
+            Log.w(LOG, "security reject: " + sr.reason);
+            Verdict sv = Verdict.byCode(Verdict.SECURITY_REJECTED, sr.reason);
+            new AlertDialog.Builder(this)
+                    .setTitle(sv.level)
+                    .setMessage(sv.detail)
+                    .setPositiveButton("知道了", null).show();
         } catch (Throwable t) {
             Log.e(LOG, "launch failed", t);
             Toast.makeText(this, "启动失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
@@ -570,14 +562,20 @@ public class MainActivity extends Activity {
         sb.append("应用模型：").append(pkg.isFaModel() ? "旧版 FA（config.json）" : "Stage（module.json）").append('\n');
         sb.append("版本：").append(pkg.versionName).append(" (").append(pkg.versionCode).append(")\n");
         sb.append("系统要求：").append(pkg.apiLabel(pkg.minApi)).append(" / ").append(pkg.apiLabel(pkg.targetApi)).append('\n');
-        sb.append("模块：").append(pkg.moduleName).append("   入口：").append(pkg.mainElement).append('\n');
+        sb.append("模块：").append(pkg.moduleName).append("（").append(pkg.moduleType).append("）   入口：").append(pkg.mainElement).append('\n');
         sb.append("入口能力：").append(pkg.abilities.isEmpty() ? "-" : String.join("、", pkg.abilities)).append('\n');
         sb.append("扩展能力：").append(pkg.extensionAbilities.isEmpty() ? "-" : String.join("、", pkg.extensionAbilities)).append('\n');
         sb.append("页面：").append(pkg.pagesProfile).append('\n');
         sb.append("设备：").append(cleanList(pkg.deviceTypes)).append('\n');
+        sb.append("原生库 ABI：").append(pkg.abis.isEmpty() ? "无" : String.join("、", pkg.abis)).append('\n');
+        sb.append("签名：").append(pkg.signature).append('\n');
+        sb.append("依赖模块：").append(pkg.dependencies.isEmpty() ? "无" : String.join("、", pkg.dependencies)).append('\n');
         sb.append("权限：").append(pkg.permissions.isEmpty() ? "无" : String.join("、", pkg.permissions)).append('\n');
         sb.append("压缩包条目：").append(pkg.entryCount).append("  图片等资源：").append(pkg.mediaCount).append(" 项\n");
         sb.append("程序字节码：").append(pkg.abcInfo).append("  (").append(pkg.abcSize / 1024).append(" KB)\n");
+        Verdict v = pkg.computeVerdict();
+        sb.append("判定：").append(v.code).append(" · ").append(v.level).append('\n');
+        sb.append("建议动作：").append(v.advice).append('\n');
         sb.append("资源索引：").append(pkg.resourcesIndexSize / 1024).append(" KB\n");
         sb.append("SHA256：").append(pkg.sha.isEmpty() ? "-" : pkg.sha.substring(0, 24) + "…").append('\n');
         sb.append("解包目录：").append(store.dir().getParentFile().getAbsolutePath()).append("/arkui-x/")
@@ -587,6 +585,24 @@ public class MainActivity extends Activity {
     }
 
     // -------------------------------------------------------------- unpack
+
+    /** 解包安全上限：总大小 / 条目数 / 单个 so / 压缩比 */
+    private static final long MAX_UNPACK_TOTAL_BYTES = 300L * 1024 * 1024;
+    private static final int MAX_UNPACK_ENTRIES = 5000;
+    private static final long MAX_SINGLE_SO_BYTES = 100L * 1024 * 1024;
+    private static final long MAX_COMPRESSION_RATIO = 100;
+    private static final long BOMB_ENTRY_BYTES = 10L * 1024 * 1024;
+    private static final Set<String> ALLOWED_ABI = new HashSet<>(Arrays.asList(
+            "arm64-v8a", "armeabi-v7a", "armeabi", "x86_64"));
+
+    /** 安全校验未通过：拒绝落盘/运行，带可读原因 */
+    static class SecurityReject extends Exception {
+        final String reason;
+        SecurityReject(String reason) {
+            super(reason);
+            this.reason = reason;
+        }
+    }
 
     /** 匹配 hap 内原生插件库条目：libs/<abi>/libxxx.so（或 <module>/libs/<abi>/libxxx.so） */
     private static final java.util.regex.Pattern SO_LIB =
@@ -607,21 +623,56 @@ public class MainActivity extends Activity {
         }
 
         int soCount = 0;
+        int entryCount = 0;
+        long totalBytes = 0;
         try (ZipFile zip = new ZipFile(pkg.file)) {
             for (java.util.Enumeration<? extends ZipEntry> e = zip.entries(); e.hasMoreElements(); ) {
                 ZipEntry ze = e.nextElement();
+                String n = ze.getName();
+                // 拒绝绝对路径 / Windows 盘符 / 上级目录跳转，配合 inside() 规范化兜底防逃逸
+                if (n.startsWith("/") || n.matches("^[A-Za-z]:.*")
+                        || n.contains("../") || n.contains("..\\")) {
+                    throw new SecurityReject("条目路径越界：" + n);
+                }
                 if (ze.isDirectory()) {
-                    File target = new File(out, ze.getName());
-                    if (inside(out, target)) {
-                        target.mkdirs();
+                    File target = new File(out, n);
+                    if (!inside(out, target)) {
+                        throw new SecurityReject("目录条目逃逸模块目录：" + n);
                     }
+                    target.mkdirs();
                     continue;
                 }
-                String n = ze.getName();
+                entryCount++;
+                if (entryCount > MAX_UNPACK_ENTRIES) {
+                    throw new SecurityReject("条目数超过上限 " + MAX_UNPACK_ENTRIES);
+                }
+                long size = ze.getSize();
+                long csize = ze.getCompressedSize();
+                if (size < 0) {
+                    // 元数据未给解压大小：流式计量，避免未知大小条目绕过总大小/单条限额
+                    size = measureEntry(zip, ze, MAX_UNPACK_TOTAL_BYTES);
+                }
+                if (size > 0) {
+                    totalBytes += size;
+                    if (totalBytes > MAX_UNPACK_TOTAL_BYTES) {
+                        throw new SecurityReject("解包总大小超过上限 " + (MAX_UNPACK_TOTAL_BYTES / 1024 / 1024) + " MB");
+                    }
+                    if (csize > 0 && size > BOMB_ENTRY_BYTES && size / csize > MAX_COMPRESSION_RATIO) {
+                        throw new SecurityReject("疑似压缩炸弹：" + n);
+                    }
+                }
                 java.util.regex.Matcher m = SO_LIB.matcher(n);
                 if (n.endsWith(".so") && m.matches()) {
+                    String abi = m.group(1);
+                    if (!ALLOWED_ABI.contains(abi)) {
+                        Log.w(LOG, "unpack skip unsupported abi: " + abi + " " + n);
+                        continue;
+                    }
+                    if (size > MAX_SINGLE_SO_BYTES) {
+                        throw new SecurityReject("原生库过大：" + n);
+                    }
                     // 原生插件库释放到独立 so 目录，不放进模块目录
-                    File soDir = new File(libsRoot, m.group(1));
+                    File soDir = new File(libsRoot, abi);
                     soDir.mkdirs();
                     File soTarget = new File(soDir, m.group(2));
                     copyEntry(zip, ze, soTarget);
@@ -630,8 +681,7 @@ public class MainActivity extends Activity {
                 }
                 File target = new File(out, n);
                 if (!inside(out, target)) {
-                    Log.w(LOG, "unpack skip outside path: " + n);
-                    continue;
+                    throw new SecurityReject("文件条目逃逸模块目录：" + n);
                 }
                 File parent = target.getParentFile();
                 if (parent != null) {
@@ -641,7 +691,8 @@ public class MainActivity extends Activity {
             }
         }
         Log.i(LOG, "unpack bundle=" + pkg.bundleName + " module=" + pkg.moduleName
-                + " dir=" + out.getAbsolutePath() + " pluginSo=" + soCount);
+                + " dir=" + out.getAbsolutePath() + " pluginSo=" + soCount
+                + " entries=" + entryCount + " bytes=" + totalBytes);
         return out;
     }
 
@@ -654,6 +705,22 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** 流式计量条目解压后字节数；超过上限即拒绝，避免未知大小条目绕过限额 */
+    private long measureEntry(ZipFile zip, ZipEntry ze, long limit) throws Exception {
+        long total = 0;
+        try (InputStream in = zip.getInputStream(ze)) {
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > limit) {
+                    throw new SecurityReject("条目解压后超过大小上限：" + ze.getName());
+                }
+            }
+        }
+        return total;
     }
 
     private void copyEntry(ZipFile zip, ZipEntry ze, File target) throws Exception {

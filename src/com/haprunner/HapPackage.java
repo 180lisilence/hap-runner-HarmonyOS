@@ -1,5 +1,7 @@
 package com.haprunner;
 
+import android.os.Build;
+
 import java.io.File;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
@@ -30,6 +32,14 @@ public class HapPackage {
     public final List<String> abilities = new ArrayList<>();
     public final List<String> extensionAbilities = new ArrayList<>();
     public final List<String> permissions = new ArrayList<>();
+    /** 包内原生库 ABI（libs/<abi>/*.so 收集） */
+    public final List<String> abis = new ArrayList<>();
+    /** 声明依赖的模块 / HSP 名称 */
+    public final List<String> dependencies = new ArrayList<>();
+    public String moduleType = "-";
+    /** signed / unsigned / unknown */
+    public String signature = "unknown";
+    public String abcVersion = "-";
     public int entryCount = 0;
     public int mediaCount = 0;
     public long abcSize = 0;
@@ -58,32 +68,72 @@ public class HapPackage {
         return abilities.isEmpty() && !extensionAbilities.isEmpty();
     }
 
+    /** 包内原生库 ABI 与本机支持 ABI 是否有交集（忽略大小写）；无 so 时视为不涉及 ABI 匹配 */
+    private boolean abiMatchesDevice() {
+        String[] deviceAbis = Build.SUPPORTED_ABIS;
+        if (deviceAbis == null) {
+            return true;
+        }
+        for (String d : deviceAbis) {
+            for (String a : abis) {
+                if (d != null && d.equalsIgnoreCase(a)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** HarmonyOS API 编码以 60000000 为基数（如 60000020 = API 20），与 Android SDK_INT 不是一套编号，不能直接比 */
     private static final int HARMONY_API_BASE = 60000000;
 
-    /** 兼容性判定：设备 API + 包自身声明 + 运行时状态 */
-    public String compatVerdict(int deviceApi) {
+    /** 结构化判定：按固定顺序产出错误码结论，UI/日志/台账统一引用 */
+    public Verdict computeVerdict() {
         if (error != null && !error.isEmpty()) {
-            return "无法识别：" + error;
+            return Verdict.byCode(Verdict.UNRECOGNIZED, error);
         }
         if (isFaModel()) {
-            return "旧版 FA 模型，手机端运行时不支持";
+            return Verdict.byCode(Verdict.FA_UNSUPPORTED, null);
         }
         if (!hasAbc()) {
-            return "缺少程序字节码（无 modules.abc），无法运行";
+            return Verdict.byCode(Verdict.NO_ABC, null);
+        }
+        // 有字节码但魔数不在当前引擎支持列表（见 assets/compat/bytecode.json）
+        if (abcInfo != null && abcInfo.startsWith("未知格式")) {
+            return Verdict.byCode(Verdict.BYTECODE_UNSUPPORTED, abcInfo);
         }
         if (isExtOnly()) {
-            return "后台服务/扩展能力，没有可打开的页面";
+            String exts = extensionAbilities.isEmpty() ? null : String.join("、", extensionAbilities);
+            return Verdict.byCode(Verdict.EXTENSION_ONLY, exts);
         }
         // deviceTypes：default 为通用类型，phone/default 均视为可在手机运行
         if (deviceTypes != null && deviceTypes.contains("[")
                 && !deviceTypes.contains("phone") && !deviceTypes.contains("default")) {
-            return "不支持在手机上运行";
+            return Verdict.byCode(Verdict.DEVICE_MISMATCH, cleanDeviceTypes(deviceTypes));
+        }
+        if (!dependencies.isEmpty()) {
+            return Verdict.byCode(Verdict.HSP_UNSUPPORTED, String.join("、", dependencies));
+        }
+        // 包内带原生库但与本机支持 ABI 无交集：属兼容缺失，不按安全拒绝处理
+        if (!abis.isEmpty() && !abiMatchesDevice()) {
+            return Verdict.byCode(Verdict.ABI_MISSING, String.join("、", abis));
         }
         if (!RuntimeProbe.isReady()) {
-            return "只能查看，不能运行（缺运行环境）";
+            return Verdict.byCode(Verdict.RUNTIME_MISSING, null);
         }
-        return "可以运行";
+        return Verdict.byCode(Verdict.OK, null);
+    }
+
+    /** 兼容旧调用：返回判定短文案 */
+    public String compatVerdict(int deviceApi) {
+        return computeVerdict().summary;
+    }
+
+    private static String cleanDeviceTypes(String s) {
+        if (s == null || s.isEmpty() || "-".equals(s)) {
+            return "-";
+        }
+        return s.replace("[", "").replace("]", "").replace("\"", "").replace(",", "、").trim();
     }
 
     public static HapPackage parse(File hap) {
@@ -110,13 +160,27 @@ public class HapPackage {
                 } else if (n.endsWith("ets/modules.abc")) {
                     p.abcSize = ze.getSize();
                     p.abcInfo = probeAbc(zip.getInputStream(ze));
+                    p.abcVersion = p.abcInfo;
                 } else if (n.endsWith("resources.index")) {
                     p.resourcesIndexSize = ze.getSize();
                 } else if (n.startsWith("resources/")) {
                     p.mediaCount++;
+                } else {
+                    java.util.regex.Matcher m = SO_ABI.matcher(n);
+                    if (m.matches()) {
+                        String abi = m.group(1);
+                        if (!p.abis.contains(abi)) {
+                            p.abis.add(abi);
+                        }
+                    } else if (isSignatureEntry(n)) {
+                        p.signature = "signed";
+                    }
                 }
             }
             zip.close();
+            if ("unknown".equals(p.signature)) {
+                p.signature = "unsigned";
+            }
             if (moduleJson != null) {
                 p.model = "stage";
                 p.fill(moduleJson);
@@ -146,9 +210,20 @@ public class HapPackage {
             }
             if (mod != null) {
                 moduleName = mod.optString("name", "entry");
+                moduleType = mod.optString("type", "-");
                 mainElement = mod.optString("mainElement", "-");
                 pagesProfile = mod.optString("pages", "-");
                 deviceTypes = mod.optJSONArray("deviceTypes") != null ? mod.optJSONArray("deviceTypes").toString() : "-";
+                org.json.JSONArray dep = mod.optJSONArray("dependencies");
+                if (dep != null) {
+                    for (int i = 0; i < dep.length(); i++) {
+                        org.json.JSONObject d = dep.optJSONObject(i);
+                        String name = d != null ? d.optString("name", "") : dep.optString(i).toString();
+                        if (!name.isEmpty() && !dependencies.contains(name)) {
+                            dependencies.add(name);
+                        }
+                    }
+                }
                 org.json.JSONArray ab = mod.optJSONArray("abilities");
                 if (ab != null) {
                     for (int i = 0; i < ab.length(); i++) {
@@ -252,6 +327,15 @@ public class HapPackage {
             return "-";
         }
         return v >= HARMONY_API_BASE ? "HarmonyOS API " + (v - HARMONY_API_BASE) : "Android API " + v;
+    }
+
+    /** 匹配 libs/<abi>/libxxx.so（或 <module>/libs/<abi>/libxxx.so） */
+    private static final java.util.regex.Pattern SO_ABI =
+            java.util.regex.Pattern.compile("(?:^|/)libs/([^/]+)/(.+\\.so)$");
+
+    private static boolean isSignatureEntry(String n) {
+        String l = n.toLowerCase();
+        return l.matches(".*\\.(p7b|sig|rsa|dsa|ec|cert|pem|x509)$");
     }
 
     // ---------------------------------------------------------------- utils

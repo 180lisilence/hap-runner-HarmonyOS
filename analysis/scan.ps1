@@ -31,13 +31,25 @@ function Scan-BytesForSusp($bytes) {
     return $hit.Keys
 }
 
+function Resolve-Compat($r) {
+    $allowed = @('arm64-v8a', 'armeabi-v7a', 'armeabi', 'x86_64')
+    if ($r.model -eq 'fa') { return 'FA_UNSUPPORTED' }
+    if ([int]$r.abc -eq 0) { return 'NO_ABC' }
+    if ($r.dep) { return 'HSP_UNSUPPORTED' }
+    if ($r.abi) {
+        $pkgAbis = $r.abi -split '\|'
+        if (-not ($pkgAbis | Where-Object { $allowed -contains $_ })) { return 'ABI_MISSING' }
+    }
+    return 'OK'
+}
+
 $rows = @()
 Get-ChildItem $SampleDir -Filter *.hap | Sort-Object Name | ForEach-Object {
     $f = $_.FullName
     $row = [ordered]@{
         file=$_.Name; sizeKB=[math]::Round($_.Length/1KB,1); model='?'; bundle='-'; module='-'; ability='-'
-        minApi=0; targetApi=0; abc=0; so=0; js=0; scripts=0; rawfile=0; permissions=''; entries=0
-        susp=''; risk=''; note=''
+        mtype='-'; abi=''; sig='unknown'; dep=''; minApi=0; targetApi=0; abc=0; so=0; js=0; scripts=0; rawfile=0; permissions=''; entries=0
+        susp=''; risk=''; note=''; compat='-'
     }
     try {
         $zip = [System.IO.Compression.ZipFile]::OpenRead($f)
@@ -51,6 +63,14 @@ Get-ChildItem $SampleDir -Filter *.hap | Sort-Object Name | ForEach-Object {
         $scripts = $entries | Where-Object { $_.FullName -match '\.(sh|cjs|dex|bin|bat)$' }
         $raw = $entries | Where-Object { $_.FullName -match 'rawfile/' }
         $row.abc=$abc.Count; $row.so=$so.Count; $row.js=$js.Count; $row.scripts=$scripts.Count; $row.rawfile=$raw.Count
+
+        $abis = @{}
+        foreach ($s in $so) {
+            if ($s.FullName -match '(?:^|/)libs/([^/]+)/') { $abis[$Matches[1]] = $true }
+        }
+        $row.abi = ($abis.Keys | Sort-Object) -join '|'
+        $sigEntry = $entries | Where-Object { $_.FullName -match '\.(p7b|sig|rsa|dsa|ec|cert|pem|x509)$' }
+        if ($sigEntry) { $row.sig = 'signed' } else { $row.sig = 'unsigned' }
 
         $json = $null
         if ($moduleJson) { $row.model='stage'; $json=Read-EntryText $zip 'module.json' }
@@ -69,8 +89,11 @@ Get-ChildItem $SampleDir -Filter *.hap | Sort-Object Name | ForEach-Object {
                 $mod = $o.module
                 if ($mod) {
                     $row.module = $mod.name
+                    if ($mod.type) { $row.mtype = $mod.type } else { $row.mtype = '-' }
                     $ab = $mod.abilities
                     if ($ab) { $row.ability = ($ab | ForEach-Object { $_.name }) -join '|' }
+                    $dep = $mod.dependencies
+                    if ($dep) { $row.dep = ($dep | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.name } }) -join '|' }
                     $pm = $mod.requestPermissions
                     if (-not $pm) { $pm = $mod.reqPermissions }
                     if ($pm) { $row.permissions = ($pm | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.name } }) -join '|' }
@@ -103,7 +126,18 @@ Get-ChildItem $SampleDir -Filter *.hap | Sort-Object Name | ForEach-Object {
     } catch {
         $row.risk='READ_FAIL'; $row.note=$_.Exception.Message
     }
-    $rows += [pscustomobject]$row
+    $obj = [pscustomobject][ordered]@{
+        file=$row.file; sizeKB=$row.sizeKB; model=$row.model; bundle=$row.bundle; module=$row.module; ability=$row.ability
+        mtype=$row.mtype; abi=$row.abi; sig=$row.sig; dep=$row.dep; minApi=$row.minApi; targetApi=$row.targetApi
+        abc=$row.abc; so=$row.so; js=$row.js; scripts=$row.scripts; rawfile=$row.rawfile; permissions=$row.permissions
+        entries=$row.entries; susp=$row.susp; risk=$row.risk; note=$row.note; compat='-'
+    }
+    $rows += $obj
+}
+
+# 按与 HapPackage.computeVerdict 同序的规则回填预期判定码（安全拒绝在解包阶段先行，此处为兼容/功能判定）
+foreach ($r in $rows) {
+    $r.compat = Resolve-Compat $r
 }
 
 $rows | Export-Csv $ReportCsv -Encoding UTF8 -NoTypeInformation
