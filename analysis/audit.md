@@ -214,3 +214,13 @@
 ### 11.7 残留
 - 动态页本轮未逐屏复核（小图此前轮次已验证可见）；MuMu 多屏 tap 坐标映射不稳仍是 UI 自动化阻塞，#17 保持 in_progress。
 - 本轮 A 线改动与 #38 修复均未 commit、未推远程。
+
+### 11.8 解包被拒包回滚加固 + 预言机复跑（2026-11-19 续）
+
+- **回滚加固**：`MainActivity.unpack` 在安全拒绝或解包异常时调用 `rollbackUnpack`，删除本次写出的模块骨架目录与本次新建的 `libsRoot`；解包前已存在的 so 根目录保留。改前备份 `backup/20261119-unpack-rollback/MainActivity.java`。
+- **设备验证（MuMu 7555）**：`sec-traversal-abs.hap`（条目路径越界 `/etc/evil.txt`）与 `sec-bomb.hap`（疑似压缩炸弹 `rawfile/fat.bin`）均抛 `SecurityReject`；拒绝后 `files/arkui-x/` 下未留下对应模块骨架目录（仅内置 `entry`、`systemres`）。
+- **ABI 样本**：`sec-bad-abi.hap`（libs/mips）so 被 `unpack skip unsupported abi: mips` 隔离，不落盘；该包 `json/abc` 落盘目录供列表展示不支持原因，属兼容拒绝用途，非安全残留。
+- **本地预言机复跑**：`hapcheck.ps1` 批量 7/7 与 `expected.txt` 对齐——legal-edge/legal-normal=OK，sec-bad-abi=ABI_MISSING，sec-bomb/too-many-entries/traversal-abs/traversal-dir=SECURITY_REJECTED。
+- **三处一致性核查**：ABI 四值（arm64-v8a/armeabi-v7a/armeabi/x86_64）与 PANDA 魔数在 Java 常量、`assets/compat/abi.json`、`bytecode.json`、`tools/hapcheck.ps1` 一致。已知差异：Java ABI 判定对照本机 `Build.SUPPORTED_ABIS`，离线 CLI 对照白名单；解耦 CLI 时改为外部注入（远期）。
+- **合法链路回归**：基准包直拉 `LaunchAbility EntryAbility`、`Ability onForeground` 正常，无 `invalid script buffer`；已知噪声（read file failed、GetAsset default.json/manifest.json）不致命。
+- **推送状态**：A 线 + #38 修复已提交 `8132e12` 并推 `origin/main`；本轮回滚加固（MainActivity +18）待提交。

@@ -618,10 +618,12 @@ public class MainActivity extends Activity {
         out.mkdirs();
         // 外部插件 so 目录：引擎第二候选搜索路径 filesDir/arkui-x/libs/<abi>
         File libsRoot = new File(root, "libs");
+        boolean libsPreExisting = libsRoot.exists();
         if (libsRoot.exists()) {
             deleteTree(libsRoot);
         }
 
+        try {
         int soCount = 0;
         int entryCount = 0;
         long totalBytes = 0;
@@ -694,6 +696,22 @@ public class MainActivity extends Activity {
                 + " dir=" + out.getAbsolutePath() + " pluginSo=" + soCount
                 + " entries=" + entryCount + " bytes=" + totalBytes);
         return out;
+        } catch (SecurityReject r) {
+            // 安全拒绝：回滚本次落盘的模块骨架与新建 so 目录，避免被拒包残留半成品
+            rollbackUnpack(out, libsRoot, libsPreExisting);
+            throw r;
+        } catch (Exception e) {
+            rollbackUnpack(out, libsRoot, libsPreExisting);
+            throw e;
+        }
+    }
+
+    /** 解包失败后清理本次写出的目录；解包前已存在的 so 根目录保留 */
+    private void rollbackUnpack(File out, File libsRoot, boolean libsPreExisting) {
+        deleteTree(out);
+        if (!libsPreExisting) {
+            deleteTree(libsRoot);
+        }
     }
 
     /** 校验解压目标未逃出模块目录（防 ../ 路径穿越） */
