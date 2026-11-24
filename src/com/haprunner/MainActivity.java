@@ -1,8 +1,11 @@
 package com.haprunner;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
+import android.os.Process;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -608,16 +611,22 @@ public class MainActivity extends Activity {
 
     /** 清理已删除 HAP 遗留的隔离解包目录；当前导入集合之外的 ext 子目录一律移除 */
     private void pruneExtDirs(Set<String> keepKeys) {
-        File extRoot = new File(getFilesDir(), "arkui-x/ext");
+        File arkRoot = new File(getFilesDir(), "arkui-x");
+        File extRoot = new File(arkRoot, "ext");
         File[] kids = extRoot.listFiles();
-        if (kids == null) {
-            return;
-        }
-        for (File k : kids) {
-            if (k.isDirectory() && !keepKeys.contains(k.getName())) {
-                Log.i(LOG, "prune stale ext dir: " + k.getName());
-                deleteTree(k);
+        if (kids != null) {
+            for (File k : kids) {
+                if (k.isDirectory() && !keepKeys.contains(k.getName())) {
+                    Log.i(LOG, "prune stale ext dir: " + k.getName());
+                    deleteTree(k);
+                }
             }
+        }
+        // 旧版本曾把内置基线备份到 arkui-x/.base；通用容器已不内置基线，残留一并清掉
+        File legacyBase = new File(arkRoot, ".base");
+        if (legacyBase.isDirectory()) {
+            Log.i(LOG, "prune legacy baked base: " + legacyBase.getName());
+            deleteTree(legacyBase);
         }
     }
 
@@ -696,14 +705,21 @@ public class MainActivity extends Activity {
         }
         try {
             File dir = unpack(pkg);
+            // 引擎固定读取 filesDir/arkui-x/entry，先把外部包整树同步过去（幂等，按体积校验）
+            ModuleSync.syncToEntry(this, dir, pkg.storageKey());
+            // 杀掉残留的 :host 进程，保证引擎模块注册表/资源缓存随新进程重新初始化，
+            // 避免上一份模块（同名 entry）被进程内缓存复用。
+            killHostProcess();
             Intent i = new Intent();
             i.setClassName(this, RuntimeProbe.HOST_ACTIVITY);
             i.putExtra("instanceName", pkg.instanceName());
             i.putExtra("bundlePath", dir.getAbsolutePath());
             i.putExtra("bundleName", pkg.bundleName);
             i.putExtra("moduleName", pkg.moduleName);
-            i.putExtra("assetsRelPath", pkg.relPath());
+            i.putExtra("assetsRelPath", "arkui-x/entry");
             i.putExtra("hapPath", pkg.file != null ? pkg.file.getAbsolutePath() : null);
+            // HapHostActivity 跑在独立进程 :host，引擎每次都在新进程里初始化，
+            // 因此这里同步完 entry 后直接前台拉起即可加载到刚同步的模块树。
             startActivity(i);
         } catch (SecurityReject sr) {
             Log.w(LOG, "security reject: " + sr.reason);
@@ -715,6 +731,26 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             Log.e(LOG, "launch failed", t);
             Toast.makeText(this, "启动失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 结束残留的 :host 独立进程；同 uid 下主进程可直接 killProcess，下次 startActivity 会重建。 */
+    private void killHostProcess() {
+        String hostName = getPackageName() + ":host";
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            java.util.List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+            if (procs == null) {
+                return;
+            }
+            for (ActivityManager.RunningAppProcessInfo p : procs) {
+                if (hostName.equals(p.processName)) {
+                    Log.i(LOG, "kill stale host process pid=" + p.pid);
+                    Process.killProcess(p.pid);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(LOG, "kill host process failed: " + t.getMessage());
         }
     }
 

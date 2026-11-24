@@ -34,10 +34,16 @@ public class HapHostActivity extends StageActivity {
                 + " rel=" + assetsRelPath
                 + " bundlePath=" + bundlePath + " hapPath=" + hapPath);
 
-        // 先注入外部模块路径，再交给 StageActivity 拉起 Ability
+        // 引擎固定从 filesDir/arkui-x/entry 读取页面字节码，所以先把外部解包目录
+        // 同步覆盖到 entry，再注入；运行器本身仍通用（不内置任何具体应用）。
         File moduleDir = bundlePath != null ? new File(bundlePath) : null;
-        File hapFile = hapPath != null ? new File(hapPath) : null;
-        boolean injected = HapRuntimeBridge.applyExternalModule(this, moduleDir, moduleName, assetsRelPath, hapFile);
+        if (moduleDir != null && moduleDir.isDirectory()) {
+            moduleDir = ModuleSync.syncToEntry(this, moduleDir, moduleDir.getName());
+            assetsRelPath = "arkui-x/entry";
+            Log.i(TAG, "entry 已同步为外部模块: " + moduleDir.getAbsolutePath());
+        }
+        // 原始 hap 不再作为容器路径注入：目录模式更稳（部分设备上 sdcard 读取会被拒）
+        boolean injected = HapRuntimeBridge.applyExternalModule(this, moduleDir, moduleName, assetsRelPath, null);
         Log.i(TAG, "external module injected=" + injected);
 
         if (instanceName != null && instanceName.length() > 0) {

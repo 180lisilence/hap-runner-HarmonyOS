@@ -88,6 +88,12 @@ if ($ArkuiXSdk -ne '') {
   $withRuntime = $true
   New-Item -ItemType Directory -Force -Path $libs, $jni, $assetsArk | Out-Null
 
+  # 清掉上次构建残留在 assets 里的旧模块树（systemres 框架资源稍后从 SDK 重新拷贝），
+  # 避免内置旧模块随 APK 再次打包、遮蔽外部 HAP 资源。
+  Get-ChildItem $assetsArk -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne 'systemres' } |
+    ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+
   # 1) 适配层 + 插件 jar
   Copy-Item $adapterJar $libs -Force
   Get-ChildItem (Join-Path $ArkuiXSdk 'plugins') -Recurse -Filter '*.jar' -ErrorAction SilentlyContinue |
@@ -104,35 +110,11 @@ if ($ArkuiXSdk -ne '') {
   # 3) 框架资源
   Copy-Item (Join-Path $engine 'systemres') $assetsArk -Recurse -Force
 
-  # 4) 把示例工程 dist 下首个 HAP 解到 assets/arkui-x/<module>（可选基线，缺失则跳过）
-  $hapFile = Get-ChildItem (Join-Path $musicRoot 'dist') -Filter *.hap -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-  if ($hapFile) {
-    $hap = $hapFile.FullName
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $z = [System.IO.Compression.ZipFile]::OpenRead($hap)
-    $mj = $z.Entries | Where-Object { $_.FullName -eq 'module.json' }
-    $moduleName = 'entry'
-    if ($mj) {
-      $sr = New-Object System.IO.StreamReader($mj.Open())
-      $json = $sr.ReadToEnd() | ConvertFrom-Json
-      $sr.Close()
-      if ($json.module.name) { $moduleName = $json.module.name }
-    }
-    $target = Join-Path $assetsArk $moduleName
-    Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path $target | Out-Null
-    foreach ($e in $z.Entries) {
-      if ($e.FullName.EndsWith('/')) { continue }
-      $out = Join-Path $target $e.FullName
-      New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent) | Out-Null
-      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
-    }
-    $z.Dispose()
-    Write-Host "[i] 内置基线 HAP 已解包到 assets/arkui-x/$moduleName"
-  } else {
-    Write-Host "[i] 示例工程 dist 下未发现 .hap，跳过内置基线包装配（仅解包/查看不受影响）"
-  }
+  # 4) 通用容器不内置任何示例 HAP 模块。
+  # 历史做法曾把示例工程 dist 下首个 HAP 解到 assets/arkui-x/<module> 作为基线，
+  # 但引擎资源提供方会读取/回填 APK 内这棵内置树，外部 HAP 同步到 files 目录后
+  # 媒体资源仍被内置旧树遮蔽（表现为跑新包还是旧封面）。这里不再打包基线模块，
+  # assets/arkui-x 下只保留 systemres 框架资源；模块全部由外部 HAP 运行时解包注入。
 
   $srcDirs += (Join-Path $root 'host-runtime')
   Write-Host "[i] 接入 ArkUI-X 运行时：$ArkuiXSdk"

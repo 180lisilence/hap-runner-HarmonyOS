@@ -43,9 +43,12 @@
         </activity>
 
         <!-- 运行时齐备时由 build.ps1 -WithRuntime 一并编入 -->
+        <!-- 独立进程 :host：引擎只在进程启动阶段装载入口 abc，放到独立进程可保证
+             每次运行都重新初始化模块树，避免复用管理进程里已经缓存的上一份模块。 -->
         <activity
             android:name=".HapHostActivity"
             android:exported="true"
+            android:process=":host"
             android:configChanges="orientation|screenSize|keyboardHidden" />
     </application>
 </manifest>
