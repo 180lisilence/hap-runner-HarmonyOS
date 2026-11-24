@@ -11,7 +11,7 @@
 
 - **选择 / 扫描 HAP**：手动挑选 `.hap` 文件，或扫描本地存储与已授权目录树；支持从文件管理器「打开方式」直接送入。
 - **解析 HAP**：读取 `module.json`，判断模型、兼容级别、主 EntryAbility，生成实例名与摘要，附带文件 SHA-256。
-- **解包装配**：把 HAP 条目解包成 ArkUI-X 的 `assets/arkui-x/<module>/` 目录结构。
+- **解包装配**：HAP 先解包到私有隔离目录 `arkui-x/ext/<包名-模块-短哈希>/`，运行前同步到引擎默认模块树 `arkui-x/<moduleName>/`；APK 不内置任何示例模块。
 - **运行时探测**：检测方舟引擎 `.so`、Java 适配层、宿主 Activity 是否齐备；缺失时给出精确缺项提示。
 - **命令行一键打包**：`aapt2` → `javac` → `d8` → 资源/原生库/assets 拼装 → `zipalign` → `apksigner`，无需 Android Studio。
 - **两种构建形态**：不带运行时（仅解析/解包）；带 ArkUI-X 运行时（可真正渲染 ArkTS 页面）。
@@ -27,7 +27,9 @@
 │  └─ RuntimeProbe.java              ArkUI-X 运行时齐备性探测与缺项提示
 ├─ host-runtime/com/haprunner/        运行时齐备时一并编入的宿主类
 │  ├─ HapApp.java                    Application 挂载
-│  └─ HapHostActivity.java           ArkUI-X 宿主 Activity
+│  ├─ HapHostActivity.java           ArkUI-X 宿主 Activity（独立进程 :host）
+│  ├─ HapRuntimeBridge.java           反射桥接引擎路径接口
+│  └─ ModuleSync.java                 外部隔离目录同步到引擎默认模块树
 ├─ arkuix-template/.arkui-x/         ArkUI-X 工程配置模板
 ├─ res/                              启动图标与 strings
 ├─ AndroidManifest.xml               清单：INTERNET / 网络状态 / 存储权限
@@ -65,7 +67,7 @@
 | 参数 | 说明 |
 | --- | --- |
 | `-ArkuiXSdk <path>` | ArkUI-X SDK 根目录；留空则自动探测常见安装路径 |
-| `-MusicProject <path>` | 关联的 HAP 工程根目录（取启动图标与内置 HAP）；默认探测 `E:\2026music` |
+| `-MusicProject <path>` | 关联示例工程根目录（仅缺失时补启动图标，不再打包内置 HAP）；默认探测 `E:\2026music` |
 | `-Install` | 构建完成后 `adb install -r` 装机 |
 | `-Launch` | 装机后拉起主 Activity |
 | `-Probe` | 只探测运行时，不构建 |
