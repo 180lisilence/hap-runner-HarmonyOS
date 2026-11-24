@@ -23,6 +23,8 @@ public final class Verdict {
     public static final String DEVICE_MISMATCH = "DEVICE_MISMATCH";
     /** 运行时三件套缺失，只能查看/解包 */
     public static final String RUNTIME_MISSING = "RUNTIME_MISSING";
+    /** 本机内置/缓存的运行时版本与 HAP 编译版本不匹配，需联网下载对应版本 */
+    public static final String RUNTIME_VERSION_MISSING = "RUNTIME_VERSION_MISSING";
     /** 缺少与设备匹配的原生库 ABI */
     public static final String ABI_MISSING = "ABI_MISSING";
     /** 字节码/API 版本与当前引擎不兼容 */
@@ -64,7 +66,7 @@ public final class Verdict {
         if (OK.equals(code)) {
             return LEVEL_RUNNABLE;
         }
-        if (RUNTIME_MISSING.equals(code)) {
+        if (RUNTIME_MISSING.equals(code) || RUNTIME_VERSION_MISSING.equals(code)) {
             return LEVEL_VIEW_ONLY;
         }
         if (UNRECOGNIZED.equals(code)) {
@@ -117,6 +119,12 @@ public final class Verdict {
                 summary = "只能查看，不能运行（缺运行环境）";
                 detail = "运行环境未就绪，只能查看和解包。";
                 advice = "用带运行时的完整版重新构建，或在已装 ArkUI-X 运行环境的设备上打开。";
+                break;
+            case RUNTIME_VERSION_MISSING:
+                summary = "缺少对应版本运行时" + (arg != null && !arg.isEmpty() ? "（v" + arg + "）" : "");
+                detail = "该 HAP 的编译 SDK / 虚拟机版本与本机内置运行时不一致，本地缓存中也没有对应版本。\n"
+                        + "首次需联网下载该版本运行时；同一版本下载过后会直接复用缓存，不会重复下载。";
+                advice = "在弹窗中点「下载运行时」获取对应版本；若提示下载源未配置，需先在设置中配置运行时仓库地址。";
                 break;
             case ABI_MISSING:
                 summary = "缺少匹配的原生库 ABI";

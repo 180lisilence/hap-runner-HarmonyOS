@@ -48,23 +48,29 @@ public class HapRuntimeBridge {
     /**
      * 把一个外部 HAP 的模块挂到引擎。
      *
-     * @param ctx        应用上下文
-     * @param moduleDir  解包后的模块目录（filesDir/arkui-x/<module>）
-     * @param moduleName 模块名（通常 entry）
-     * @param hapFile    原始 hap 文件（可选，作为容器路径注入）
+     * @param ctx           应用上下文
+     * @param moduleDir     解包后的模块目录（filesDir/arkui-x/ext/<key>）
+     * @param moduleName    外部 HAP 的模块名（用于原生模块注册表登记）
+     * @param assetsRelPath 模块相对 arkui-x 根的前缀（arkui-x/ext/<key>）
+     * @param hapFile       原始 hap 文件（可选，作为容器路径注入）
      * @return delegate 是否可取、注入是否调用成功
      */
-    public static boolean applyExternalModule(Context ctx, File moduleDir, String moduleName, File hapFile) {
+    public static boolean applyExternalModule(Context ctx, File moduleDir, String moduleName,
+                                              String assetsRelPath, File hapFile) {
         StageApplicationDelegate d = obtainDelegate(ctx);
         if (d == null) {
             Log.e(TAG, "applyExternalModule: delegate 不可用，跳过路径注入");
             return false;
         }
+        String mod = moduleName != null && !moduleName.isEmpty() ? moduleName : "entry";
         try {
             File arkRoot = new File(ctx.getFilesDir(), "arkui-x");
+            String rel = assetsRelPath != null && !assetsRelPath.isEmpty()
+                    ? assetsRelPath : "arkui-x/ext";
             Log.i(TAG, "applyExternalModule arkRoot=" + arkRoot.getAbsolutePath()
                     + " moduleDir=" + (moduleDir != null ? moduleDir.getAbsolutePath() : "null")
-                    + " module=" + moduleName
+                    + " module=" + mod
+                    + " rel=" + rel
                     + " hap=" + (hapFile != null ? hapFile.getAbsolutePath() : "null"));
 
             // 资源前缀：filesDir/arkui-x（内置默认值，外部模块资源同样落在此树内）
@@ -80,9 +86,20 @@ public class HapRuntimeBridge {
                 Log.i(TAG, "setHapPath(dir)=" + moduleDir.getAbsolutePath());
             }
 
-            // 容器内模块相对前缀：arkui-x/<module>（与内置 assets 布局对齐）
-            d.setAssetsFileRelativePath("arkui-x/" + moduleName);
-            Log.i(TAG, "setAssetsFileRelativePath=arkui-x/" + moduleName);
+            // 容器内模块相对前缀：随所选 HAP 的隔离目录
+            d.setAssetsFileRelativePath(rel);
+            Log.i(TAG, "setAssetsFileRelativePath=" + rel);
+
+            // 解绑内置模块绑定：把外部模块主动登记进原生模块注册表（预加载 + 加载），
+            // 模块名与 abc 相对路径均来自所选 HAP，不再只认内置基准模块树。
+            String abcRel = "./ets/modules.abc";
+            try {
+                StageApplication.preloadEtsModule(mod, abcRel);
+                StageApplicationDelegate.loadModule(mod, abcRel);
+                Log.i(TAG, "external module registered: " + mod + " " + abcRel);
+            } catch (Throwable reg) {
+                Log.w(TAG, "register external module failed: " + reg.getMessage());
+            }
             return true;
         } catch (Throwable t) {
             Log.e(TAG, "applyExternalModule failed", t);

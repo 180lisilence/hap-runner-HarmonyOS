@@ -72,6 +72,7 @@ function Audit-Hap([string]$file) {
         type = '-'; bundle = '-'; module = '-'; mtype = '-'; ability = '-'
         abis = ''; bytecode = '-'; apiVersion = '-'; deviceTypes = '-'; permissions = ''
         sigStatus = 'unknown'; dep = ''; entries = 0; soCount = 0; totalBytes = 0
+        versionName = '-'; versionCode = 0; buildTime = '-'; compileSdk = '-'; vm = '-'; requiredRuntime = '-'
         verdictCode = 'UNRECOGNIZED'; supportLevel = '待验证'; reasons = @(); advice = ''
     }
     $reasons = New-Object System.Collections.Generic.List[string]
@@ -84,7 +85,7 @@ function Audit-Hap([string]$file) {
 
         # ---- 1) 安全审计（先于兼容/功能判定）----
         $total = 0L; $abis = @{}; $soCount = 0; $secReject = $null
-        $entryIndex = 0
+        $entryIndex = 0; $latest = [datetimeoffset]::MinValue
         foreach ($e in $entries) {
             $entryIndex++
             $n = $e.FullName
@@ -92,6 +93,7 @@ function Audit-Hap([string]$file) {
                 $secReject = "条目路径越界：$n"; break
             }
             if (-not $e.IsDirectory) {
+                if ($e.LastWriteTime -gt $latest) { $latest = $e.LastWriteTime }
                 $size = $e.Length
                 $csize = $e.CompressedLength
                 if ($size -lt 0) { $size = 0 }  # 预言机侧不做流式计量，未知大小记 0 并在 reasons 标注
@@ -110,6 +112,9 @@ function Audit-Hap([string]$file) {
         }
         $rep.totalBytes = $total; $rep.soCount = $soCount
         $rep.abis = ($abis.Keys | Sort-Object) -join '|'
+        if ($latest -gt [datetimeoffset]::MinValue) {
+            $rep.buildTime = $latest.LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+        }
 
         if ($secReject) {
             $rep.verdictCode = 'SECURITY_REJECTED'; $reasons.Add($secReject)
@@ -133,11 +138,18 @@ function Audit-Hap([string]$file) {
                 if ($app) {
                     $rep.bundle = $app.bundleName
                     if ($app.minAPIVersion) { $rep.apiVersion = [string]$app.minAPIVersion }
+                    if ($app.versionName) { $rep.versionName = [string]$app.versionName }
+                    if ($app.versionCode) { $rep.versionCode = [int]$app.versionCode }
+                    $sdkType = [string]$app.compileSdkType
+                    $sdkVer = [string]$app.compileSdkVersion
+                    if ($sdkVer) { $rep.compileSdk = ($sdkType, $sdkVer -join ' ') }
                 }
                 $mod = $o.module
                 if ($mod) {
                     $rep.module = $mod.name
                     if ($mod.type) { $rep.mtype = $mod.type }
+                    if ($mod.virtualMachine) { $rep.vm = [string]$mod.virtualMachine }
+                    $rep.requiredRuntime = if ($app -and $app.compileSdkVersion) { [string]$app.compileSdkVersion } else { $rep.vm }
                     if ($mod.deviceTypes) { $rep.deviceTypes = ($mod.deviceTypes | ForEach-Object { "$_" }) -join '|' }
                     if ($mod.dependencies) { $rep.dep = ($mod.dependencies | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.name } }) -join '|' }
                     $ab = $mod.abilities
@@ -196,18 +208,19 @@ if ((Test-Path $Path -PathType Container)) {
     if ($OutCsv) { $reports | Export-Csv $OutCsv -Encoding UTF8 -NoTypeInformation }
     if ($OutMarkdown) {
         $lines = @('# HAP 兼容矩阵', '', "生成时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm')  样本数: $($reports.Count)", '',
-            '| 文件 | 判定码 | 等级 | 包名 | 模块 | 类型 | ABI | 字节码 | 设备类型 | 依赖 | 签名 | 依据 |',
-            '|---|---|---|---|---|---|---|---|---|---|---|---|')
+            '| 文件 | 判定码 | 等级 | 包名 | 版本 | 构建时间 | 模块 | 类型 | ABI | 字节码 | 设备类型 | 依赖 | 签名 | 依据 |',
+            '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
         foreach ($x in $reports) {
             $reason = ($x.reasons -join '; ')
-            $lines += "| $($x.file) | $($x.verdictCode) | $($x.supportLevel) | $($x.bundle) | $($x.module) | $($x.mtype) | $($x.abis) | $($x.bytecode) | $($x.deviceTypes) | $($x.dep) | $($x.sigStatus) | $reason |"
+            $ver = "$($x.versionName) ($($x.versionCode))"
+            $lines += "| $($x.file) | $($x.verdictCode) | $($x.supportLevel) | $($x.bundle) | $ver | $($x.buildTime) | $($x.module) | $($x.mtype) | $($x.abis) | $($x.bytecode) | $($x.deviceTypes) | $($x.dep) | $($x.sigStatus) | $reason |"
         }
         [System.IO.File]::WriteAllLines($OutMarkdown, $lines, [System.Text.Encoding]::UTF8)
     }
     if ($Json) { $reports | ConvertTo-Json -Depth 5 }
     else {
         $reports | ForEach-Object {
-            "{0,-26} [{1,-18}] {2,-22} {3}" -f $_.file, $_.verdictCode, $_.bundle, ($_.reasons -join '; ')
+            "{0,-26} [{1,-18}] {2,-22} v{3} {4} {5}" -f $_.file, $_.verdictCode, $_.bundle, $_.versionName, $_.buildTime, ($_.reasons -join '; ')
         }
     }
     exit 0
@@ -217,6 +230,9 @@ else {
     if ($Json) { $r | ConvertTo-Json -Depth 5 }
     else {
         "文件: $($r.file)  大小: $($r.sizeKB) KB"
+        "版本: $($r.versionName) ($($r.versionCode))  构建时间: $($r.buildTime)"
+        "编译 SDK: $($r.compileSdk)  虚拟机: $($r.vm)"
+        "所需运行时: v$($r.requiredRuntime)"
         "判定: $($r.verdictCode) · $($r.supportLevel)"
         if ($r.reasons) { "依据: $($r.reasons -join '; ')" }
         "建议: $($r.advice)"

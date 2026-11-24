@@ -16,7 +16,8 @@ $root = $PSScriptRoot
 $build = Join-Path $root 'build'
 $dist = Join-Path $root 'dist'
 
-# 音乐项目根目录（提供 launcher 图标与内置 HAP）。默认探测 E:\2026music，其次回退到上级目录。
+# 可选示例工程根目录（仅用于取 launcher 图标与内置基线 HAP；运行器本身不绑定任何具体应用）。
+# 默认探测 E:\2026music，其次回退到上级目录；取不到对应文件时跳过，不阻断构建。
 if ($MusicProject -eq '') {
   $MusicProject = if (Test-Path 'E:\2026music') { 'E:\2026music' } else { Split-Path $root -Parent }
 }
@@ -66,9 +67,9 @@ $adb = 'D:\Android\Sdk\platform-tools\adb.exe'
 
 New-Item -ItemType Directory -Force -Path $build, $dist | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $root 'res\drawable') | Out-Null
-if (-not (Test-Path (Join-Path $root 'res\drawable\ic_launcher.png'))) {
-  Copy-Item (Join-Path $musicRoot 'entry\src\main\resources\base\media\startIcon.png') `
-    (Join-Path $root 'res\drawable\ic_launcher.png') -Force
+$iconSrc = Join-Path $musicRoot 'entry\src\main\resources\base\media\startIcon.png'
+if (-not (Test-Path (Join-Path $root 'res\drawable\ic_launcher.png')) -and (Test-Path $iconSrc)) {
+  Copy-Item $iconSrc (Join-Path $root 'res\drawable\ic_launcher.png') -Force
 }
 
 # ---------------------------------------------------------------- 运行时装配
@@ -103,9 +104,11 @@ if ($ArkuiXSdk -ne '') {
   # 3) 框架资源
   Copy-Item (Join-Path $engine 'systemres') $assetsArk -Recurse -Force
 
-  # 4) 把内置 HAP 解到 assets/arkui-x/<module>
-  $hap = Join-Path $musicRoot 'dist\HeimaMusic-6.0.0-debug-unsigned.hap'
-  if (Test-Path $hap) {
+  # 4) 把示例工程 dist 下首个 HAP 解到 assets/arkui-x/<module>（可选基线，缺失则跳过）
+  $hapFile = Get-ChildItem (Join-Path $musicRoot 'dist') -Filter *.hap -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($hapFile) {
+    $hap = $hapFile.FullName
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $z = [System.IO.Compression.ZipFile]::OpenRead($hap)
     $mj = $z.Entries | Where-Object { $_.FullName -eq 'module.json' }
@@ -126,7 +129,9 @@ if ($ArkuiXSdk -ne '') {
       [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
     }
     $z.Dispose()
-    Write-Host "[i] 内置 HAP 已解包到 assets/arkui-x/$moduleName"
+    Write-Host "[i] 内置基线 HAP 已解包到 assets/arkui-x/$moduleName"
+  } else {
+    Write-Host "[i] 示例工程 dist 下未发现 .hap，跳过内置基线包装配（仅解包/查看不受影响）"
   }
 
   $srcDirs += (Join-Path $root 'host-runtime')

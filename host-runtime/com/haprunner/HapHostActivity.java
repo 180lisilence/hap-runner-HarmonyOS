@@ -24,18 +24,20 @@ public class HapHostActivity extends StageActivity {
         String bundleName = getIntent() != null ? getIntent().getStringExtra("bundleName") : null;
         String moduleName = getIntent() != null ? getIntent().getStringExtra("moduleName") : null;
         String hapPath = getIntent() != null ? getIntent().getStringExtra("hapPath") : null;
+        String assetsRelPath = getIntent() != null ? getIntent().getStringExtra("assetsRelPath") : null;
         if (moduleName == null || moduleName.isEmpty()) {
             moduleName = "entry";
         }
 
         Log.i(TAG, "HapHostActivity.onCreate instanceName=" + instanceName
                 + " bundle=" + bundleName + " module=" + moduleName
+                + " rel=" + assetsRelPath
                 + " bundlePath=" + bundlePath + " hapPath=" + hapPath);
 
         // 先注入外部模块路径，再交给 StageActivity 拉起 Ability
         File moduleDir = bundlePath != null ? new File(bundlePath) : null;
         File hapFile = hapPath != null ? new File(hapPath) : null;
-        boolean injected = HapRuntimeBridge.applyExternalModule(this, moduleDir, moduleName, hapFile);
+        boolean injected = HapRuntimeBridge.applyExternalModule(this, moduleDir, moduleName, assetsRelPath, hapFile);
         Log.i(TAG, "external module injected=" + injected);
 
         if (instanceName != null && instanceName.length() > 0) {

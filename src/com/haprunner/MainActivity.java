@@ -16,6 +16,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -44,13 +45,10 @@ public class MainActivity extends Activity {
     private static final int REQ_TREE = 1002;
     private static final int REQ_STORAGE = 1003;
     private static final String LOG = "HAPRUNNER";
-    private static final String BG = "#0d0d10";
-    private static final String CARD = "#1e1e24";
-    private static final String TXT = "#ffffff";
-    private static final String SUB = "#a3a3ab";
-    private static final String ACCENT = "#e4608b";
-    private static final String WARN = "#ffb020";
-    private static final String OK = "#4cd964";
+    private static final String PREFS = "hap_runner";
+
+    // 主题色板（深浅两套，由设置页切换后重建页面生效）
+    private String bg, card, txt, sub, accent, warn, ok, pillBg, pillFg;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private LinearLayout listBox;
@@ -59,32 +57,43 @@ public class MainActivity extends Activity {
     private TextView scanStatus;
     private HapStore store;
     private HapScanner scanner;
-    private String bakedBundle = "";
+    private AlertDialog settingsDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        applyThemePalette();
+        RuntimeManager.init(getFilesDir());
+        RuntimeManager.setRepoBase(getSharedPreferences(PREFS, MODE_PRIVATE).getString("repo_base", ""));
         store = new HapStore(this);
         scanner = new HapScanner(this);
-        bakedBundle = readBakedBundle();
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor(BG));
+        scroll.setBackgroundColor(Color.parseColor(bg));
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(18), dp(16), dp(28));
         scroll.addView(root, new ViewGroup.LayoutParams(-1, -2));
         setContentView(scroll);
 
-        TextView title = text("HAP 运行器", 24, TXT, true);
-        root.addView(title);
-        TextView sub = text("打开 HarmonyOS 应用包（.hap）", 12, SUB, false);
-        sub.setPadding(0, dp(4), 0, dp(14));
-        root.addView(sub);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text("HAP 运行器", 24, txt, true);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, -2, 1f);
+        header.addView(title, titleLp);
+        TextView settings = pill("设置", pillBg, pillFg);
+        settings.setOnClickListener(v -> showSettings());
+        header.addView(settings, new LinearLayout.LayoutParams(-2, -2));
+        root.addView(header);
 
-        TextView pick = text("打开 .hap 文件", 15, "#ffffff", true);
+        TextView subtitle = text("打开 HarmonyOS 应用包（.hap）", 12, sub, false);
+        subtitle.setPadding(0, dp(4), 0, dp(14));
+        root.addView(subtitle);
+
+        TextView pick = text("打开 .hap 文件", 15, txt, true);
         GradientDrawable pb = new GradientDrawable();
-        pb.setColor(Color.parseColor(ACCENT));
+        pb.setColor(Color.parseColor(accent));
         pb.setCornerRadius(dp(24));
         pick.setBackground(pb);
         pick.setGravity(Gravity.CENTER);
@@ -94,13 +103,13 @@ public class MainActivity extends Activity {
         plp.bottomMargin = dp(10);
         root.addView(pick, plp);
 
-        TextView scanBtn = pill("扫描本机", "#2a2a32", "#ffffff");
+        TextView scanBtn = pill("扫描本机", pillBg, pillFg);
         scanBtn.setOnClickListener(v -> startScan());
-        TextView deepBtn = pill("深度扫描", "#2a2a32", "#ffffff");
+        TextView deepBtn = pill("深度扫描", pillBg, pillFg);
         deepBtn.setOnClickListener(v -> startScan(true));
-        TextView dirBtn = pill("选择文件夹", "#2a2a32", SUB);
+        TextView dirBtn = pill("选择文件夹", pillBg, sub);
         dirBtn.setOnClickListener(v -> openTreePicker());
-        TextView allBtn = pill("存储权限", "#2a2a32", SUB);
+        TextView allBtn = pill("存储权限", pillBg, sub);
         allBtn.setOnClickListener(v -> requestAllFilesAccess());
 
         LinearLayout scanRow1 = new LinearLayout(this);
@@ -127,7 +136,7 @@ public class MainActivity extends Activity {
         scanRow2.addView(allBtn, new LinearLayout.LayoutParams(0, -2, 1f));
         root.addView(scanRow2, r2lp);
 
-        scanStatus = text("", 11, SUB, false);
+        scanStatus = text("", 11, sub, false);
         scanStatus.setPadding(dp(2), 0, dp(2), dp(8));
         root.addView(scanStatus);
 
@@ -135,7 +144,7 @@ public class MainActivity extends Activity {
         foundBox.setOrientation(LinearLayout.VERTICAL);
         root.addView(foundBox, new LinearLayout.LayoutParams(-1, -2));
 
-        statusView = text(runtimeLine(), 12, RuntimeProbe.isReady() ? OK : WARN, false);
+        statusView = text(runtimeLine(), 12, RuntimeProbe.isReady() ? ok : warn, false);
         statusView.setPadding(dp(2), 0, dp(2), dp(10));
         root.addView(statusView);
 
@@ -243,8 +252,8 @@ public class MainActivity extends Activity {
         scanStatus.setText("扫描到 " + refs.size() + " 个应用包");
         if (refs.isEmpty()) {
             LinearLayout empty = card();
-            empty.addView(text("没有找到 .hap 文件", 13, TXT, true));
-            empty.addView(text("可点「选择文件夹」，或先授予存储权限后重新扫描", 11, SUB, false));
+            empty.addView(text("没有找到 .hap 文件", 13, txt, true));
+            empty.addView(text("可点「选择文件夹」，或先授予存储权限后重新扫描", 11, sub, false));
             foundBox.addView(empty);
             return;
         }
@@ -253,36 +262,21 @@ public class MainActivity extends Activity {
             foundBox.addView(foundRow(refs.get(i)));
         }
         if (refs.size() > limit) {
-            foundBox.addView(text("只显示前 50 个，共 " + refs.size() + " 个", 11, SUB, false));
-        }
-    }
-
-    private String readBakedBundle() {
-        try (InputStream in = getAssets().open("arkui-x/entry/module.json")) {
-            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                bos.write(buf, 0, n);
-            }
-            org.json.JSONObject root = new org.json.JSONObject(new String(bos.toByteArray(), "UTF-8"));
-            return root.optJSONObject("app") != null ? root.getJSONObject("app").optString("bundleName", "") : "";
-        } catch (Throwable t) {
-            return "";
+            foundBox.addView(text("只显示前 50 个，共 " + refs.size() + " 个", 11, sub, false));
         }
     }
 
     private LinearLayout foundRow(HapScanner.HapRef ref) {
         LinearLayout box = card();
-        box.addView(text(ref.name, 14, TXT, true));
-        box.addView(text((ref.size / 1024) + " KB", 11, SUB, false));
+        box.addView(text(ref.name, 14, txt, true));
+        box.addView(text((ref.size / 1024) + " KB", 11, sub, false));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setPadding(0, dp(8), 0, 0);
-        TextView run = pill("运行", ACCENT);
+        TextView run = pill("运行", accent);
         run.setOnClickListener(v -> importRef(ref, true));
-        TextView imp = pill("加入列表", "#2a2a32", TXT);
+        TextView imp = pill("加入列表", pillBg, txt);
         imp.setOnClickListener(v -> importRef(ref, false));
         LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(-2, -2);
         lp1.rightMargin = dp(8);
@@ -366,6 +360,148 @@ public class MainActivity extends Activity {
                 : "运行环境：未就绪，只能查看和解包";
     }
 
+    // ------------------------------------------------------------- 设置 / 主题 / 关于
+
+    private void applyThemePalette() {
+        String theme = getSharedPreferences(PREFS, MODE_PRIVATE).getString("theme", "dark");
+        if ("light".equals(theme)) {
+            bg = "#f2f3f7"; card = "#ffffff"; txt = "#16171c"; sub = "#5b5d66";
+            accent = "#c94f76"; warn = "#b97a00"; ok = "#2e9e4f";
+            pillBg = "#e6e8ee"; pillFg = "#16171c";
+        } else {
+            bg = "#0d0d10"; card = "#1e1e24"; txt = "#ffffff"; sub = "#a3a3ab";
+            accent = "#e4608b"; warn = "#ffb020"; ok = "#4cd964";
+            pillBg = "#2a2a32"; pillFg = "#ffffff";
+        }
+    }
+
+    private boolean isDarkTheme() {
+        return !"light".equals(getSharedPreferences(PREFS, MODE_PRIVATE).getString("theme", "dark"));
+    }
+
+    private void toggleTheme() {
+        String next = isDarkTheme() ? "light" : "dark";
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("theme", next).apply();
+        if (settingsDialog != null) { settingsDialog.dismiss(); settingsDialog = null; }
+        recreate();
+    }
+
+    private void showSettings() {
+        List<String> cached = RuntimeManager.cachedVersions();
+        String rt = "运行时 " + RuntimeManager.BUNDLED_VERSION
+                + " · 缓存：" + (cached.isEmpty() ? "无" : String.join("、", cached))
+                + " · 源：" + (RuntimeManager.getRepoBase().isEmpty() ? "未配置" : "已填写");
+
+        if (settingsDialog != null) { settingsDialog.dismiss(); settingsDialog = null; }
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(10), dp(16), dp(6));
+        scroll.addView(box, new ViewGroup.LayoutParams(-1, -2));
+        box.addView(text(rt, 12, sub, false));
+
+        TextView themeRow = settingsRow("明暗模式：" + (isDarkTheme() ? "深色" : "浅色"));
+        themeRow.setOnClickListener(v -> toggleTheme());
+        box.addView(themeRow);
+
+        TextView repoRow = settingsRow("下载源地址");
+        repoRow.setOnClickListener(v -> editRepoBase());
+        box.addView(repoRow);
+
+        TextView aboutRow = settingsRow("关于本运行器");
+        aboutRow.setOnClickListener(v -> showAbout());
+        box.addView(aboutRow);
+
+        settingsDialog = new AlertDialog.Builder(this)
+                .setTitle("设置")
+                .setView(scroll)
+                .setPositiveButton("关闭", null).show();
+        settingsDialog.setOnDismissListener(d -> { if (settingsDialog == d) settingsDialog = null; });
+    }
+
+    private TextView settingsRow(String label) {
+        TextView t = text(label, 14, txt, false);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(Color.parseColor(pillBg));
+        g.setCornerRadius(dp(12));
+        t.setBackground(g);
+        t.setGravity(Gravity.CENTER_VERTICAL);
+        t.setMinimumHeight(dp(44));
+        t.setPadding(dp(14), dp(10), dp(14), dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(8);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    private void editRepoBase() {
+        final EditText input = new EditText(this);
+        input.setText(RuntimeManager.getRepoBase());
+        input.setHint("https://example.com/runtime-repo");
+        input.setPadding(dp(16), dp(12), dp(16), dp(12));
+        new AlertDialog.Builder(this)
+                .setTitle("下载源地址")
+                .setView(input)
+                .setMessage("约定产物：<地址>/runtimes/<版本>.zip")
+                .setPositiveButton("保存", (d, w) -> {
+                    String base = input.getText().toString().trim();
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("repo_base", base).apply();
+                    RuntimeManager.setRepoBase(base);
+                    Toast.makeText(this, "下载源已保存", Toast.LENGTH_SHORT).show();
+                    showSettings();
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    private void showAbout() {
+        List<String> cached = RuntimeManager.cachedVersions();
+        String rt = "运行时信息：内置版本 " + RuntimeManager.BUNDLED_VERSION
+                + "；已下载缓存：" + (cached.isEmpty() ? "无" : String.join("、", cached))
+                + "；下载源：" + (RuntimeManager.getRepoBase().isEmpty() ? "未配置（可在设置中填写）" : RuntimeManager.getRepoBase())
+                + "。运行时按 HAP 编译版本按需下载，同版本复用缓存。\n\n";
+        String about = "出品工作室：云客工作室（个人学习项目，非商业发布）\n\n"
+                + rt
+                + "来源仓库：https://github.com/180lisilence/hap-runner-HarmonyOS\n\n"
+                + "应用类型：Android 侧通用 HarmonyOS（.hap）运行器 / 宿主，负责选择、扫描、解析、解包，"
+                + "并经 ArkUI-X 运行时渲染 ArkTS 页面；不专属于任何单个应用。\n\n"
+                + "关联项目：heimayun-music-self（示例 HarmonyOS 音乐应用）；blackmusic（本地内置客户端）；"
+                + "housemusic（配套数据版本仓）。\n\n"
+                + "构建方：本机命令行工具链 Android SDK 35 / JDK 21 / aapt2 / d8 / apksigner；"
+                + "宿主包名 com.haprunner，版本 1.1.0（versionCode 2），单 arm64-v8a。\n\n"
+                + "开源借鉴：ArkUI-X 跨平台框架与 OpenHarmony 系统组件（开放原子开源项目，Apache-2.0 协议）、"
+                + "方舟 Panda 字节码虚拟机及官方示例工程；选择 / 扫描 / 解析 / 解包 / 隔离 / 判定等壳层代码为本项目自研。\n\n"
+                + "说明：本项目为个人学习用途，与 HarmonyOS / OpenHarmony 官方无关；运行时与引擎版权归原项目所有。";
+        new AlertDialog.Builder(this).setTitle("关于").setMessage(about)
+                .setPositiveButton("关闭", null).show();
+    }
+
+    /** 后台下载所选 HAP 所需版本的运行时；成功后刷新列表并自动重试拉起 */
+    private void downloadRuntime(HapPackage pkg) {
+        final String ver = pkg.requiredRuntimeVersion();
+        Toast.makeText(this, "开始下载运行时 v" + ver + "…", Toast.LENGTH_SHORT).show();
+        RuntimeManager.download(ver, new RuntimeManager.Callback() {
+            @Override
+            public void onProgress(int pct) {
+                Log.i(LOG, "runtime download " + ver + " progress " + pct + "%");
+            }
+
+            @Override
+            public void onSuccess(String v) {
+                ui.post(() -> {
+                    Toast.makeText(MainActivity.this, "运行时 v" + v + " 已就绪", Toast.LENGTH_SHORT).show();
+                    refresh();
+                    tryRun(pkg);
+                });
+            }
+
+            @Override
+            public void onFailure(String v, String err) {
+                ui.post(() -> Toast.makeText(MainActivity.this, "运行时下载失败：" + err,
+                        Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
     private void openPicker() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -435,7 +571,7 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(CARD));
+        bg.setColor(Color.parseColor(card));
         bg.setCornerRadius(dp(14));
         box.setBackground(bg);
         box.setPadding(dp(14), dp(12), dp(14), dp(12));
@@ -443,9 +579,9 @@ public class MainActivity extends Activity {
         lp.bottomMargin = dp(14);
         root.addView(box, lp);
 
-        box.addView(text("本机", 13, SUB, false));
+        box.addView(text("本机", 13, sub, false));
         box.addView(text(android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
-                + "  ·  Android " + android.os.Build.VERSION.RELEASE, 12, TXT, false));
+                + "  ·  Android " + android.os.Build.VERSION.RELEASE, 12, txt, false));
     }
 
     private void refresh() {
@@ -454,16 +590,34 @@ public class MainActivity extends Activity {
         }
         listBox.removeAllViews();
         List<File> files = store.list();
+        Set<String> keepKeys = new HashSet<>();
         if (files.isEmpty()) {
             LinearLayout empty = card();
-            empty.addView(text("还没有应用", 14, TXT, true));
-            empty.addView(text("点「打开 .hap 文件」选择应用包，或先扫描本机", 12, SUB, false));
+            empty.addView(text("还没有应用", 14, txt, true));
+            empty.addView(text("点「打开 .hap 文件」选择应用包，或先扫描本机", 12, sub, false));
             listBox.addView(empty);
+        } else {
+            for (File f : files) {
+                HapPackage pkg = HapPackage.parse(f);
+                keepKeys.add(pkg.storageKey());
+                listBox.addView(row(pkg));
+            }
+        }
+        pruneExtDirs(keepKeys);
+    }
+
+    /** 清理已删除 HAP 遗留的隔离解包目录；当前导入集合之外的 ext 子目录一律移除 */
+    private void pruneExtDirs(Set<String> keepKeys) {
+        File extRoot = new File(getFilesDir(), "arkui-x/ext");
+        File[] kids = extRoot.listFiles();
+        if (kids == null) {
             return;
         }
-        for (File f : files) {
-            HapPackage pkg = HapPackage.parse(f);
-            listBox.addView(row(pkg));
+        for (File k : kids) {
+            if (k.isDirectory() && !keepKeys.contains(k.getName())) {
+                Log.i(LOG, "prune stale ext dir: " + k.getName());
+                deleteTree(k);
+            }
         }
     }
 
@@ -471,7 +625,7 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(CARD));
+        bg.setColor(Color.parseColor(card));
         bg.setCornerRadius(dp(14));
         box.setBackground(bg);
         box.setPadding(dp(14), dp(12), dp(14), dp(12));
@@ -483,11 +637,14 @@ public class MainActivity extends Activity {
 
     private LinearLayout row(HapPackage pkg) {
         LinearLayout box = card();
-        box.addView(text(pkg.name, 15, TXT, true));
-        box.addView(text(pkg.brief(), 12, SUB, false));
+        box.addView(text(pkg.name, 15, txt, true));
+        box.addView(text(pkg.brief(), 12, sub, false));
+        // 同名构建也能靠 包名/版本/构建时间/短哈希 区分
+        box.addView(text(pkg.bundleName + "  ·  " + pkg.buildTimeLabel() + "  ·  " + pkg.shortSha,
+                11, sub, false));
         Verdict verdict = pkg.computeVerdict();
         boolean canRun = verdict.isRunnable();
-        TextView verdictView = text(verdict.summary, 12, canRun ? OK : WARN, false);
+        TextView verdictView = text(verdict.summary, 12, canRun ? ok : warn, false);
         verdictView.setPadding(0, dp(4), 0, 0);
         box.addView(verdictView);
 
@@ -495,11 +652,11 @@ public class MainActivity extends Activity {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setPadding(0, dp(10), 0, 0);
 
-        TextView run = pill("运行", ACCENT);
+        TextView run = pill("运行", accent);
         run.setOnClickListener(v -> tryRun(pkg));
-        TextView detail = pill("详情", "#2a2a32", TXT);
+        TextView detail = pill("详情", pillBg, txt);
         detail.setOnClickListener(v -> showDetail(pkg));
-        TextView remove = pill("删除", "#2a2a32", SUB);
+        TextView remove = pill("删除", pillBg, sub);
         remove.setOnClickListener(v -> {
             store.delete(pkg.file);
             refresh();
@@ -525,10 +682,16 @@ public class MainActivity extends Activity {
                 msg = msg + "\n" + RuntimeProbe.describe();
             }
             msg = msg + "\n\n建议：" + v.advice;
-            new AlertDialog.Builder(this)
+            AlertDialog.Builder b = new AlertDialog.Builder(this)
                     .setTitle(v.level)
-                    .setMessage(msg)
-                    .setPositiveButton("知道了", null).show();
+                    .setMessage(msg);
+            if (Verdict.RUNTIME_VERSION_MISSING.equals(v.code)) {
+                b.setPositiveButton("下载运行时", (d, w) -> downloadRuntime(pkg));
+                b.setNegativeButton("知道了", null);
+            } else {
+                b.setPositiveButton("知道了", null);
+            }
+            b.show();
             return;
         }
         try {
@@ -539,6 +702,7 @@ public class MainActivity extends Activity {
             i.putExtra("bundlePath", dir.getAbsolutePath());
             i.putExtra("bundleName", pkg.bundleName);
             i.putExtra("moduleName", pkg.moduleName);
+            i.putExtra("assetsRelPath", pkg.relPath());
             i.putExtra("hapPath", pkg.file != null ? pkg.file.getAbsolutePath() : null);
             startActivity(i);
         } catch (SecurityReject sr) {
@@ -560,7 +724,15 @@ public class MainActivity extends Activity {
         sb.append("大小：").append(pkg.size / 1024).append(" KB\n");
         sb.append("应用包名：").append(pkg.bundleName).append('\n');
         sb.append("应用模型：").append(pkg.isFaModel() ? "旧版 FA（config.json）" : "Stage（module.json）").append('\n');
-        sb.append("版本：").append(pkg.versionName).append(" (").append(pkg.versionCode).append(")\n");
+        sb.append("版本：").append(pkg.versionLabel()).append('\n');
+        sb.append("构建时间：").append(pkg.buildTimeLabel()).append('\n');
+        sb.append("编译 SDK：").append(pkg.compileSdkType).append(' ').append(pkg.compileSdkVersion)
+                .append(pkg.apiReleaseType.equals("-") ? "" : "（" + pkg.apiReleaseType + "）").append('\n');
+        sb.append("厂商：").append(pkg.vendor).append("   包类型：").append(pkg.bundleType)
+                .append("   构建模式：").append(pkg.buildMode).append('\n');
+        sb.append("虚拟机：").append(pkg.virtualMachine).append('\n');
+        sb.append("所需运行时：v").append(pkg.requiredRuntimeVersion())
+                .append(RuntimeManager.isAvailable(pkg.requiredRuntimeVersion()) ? "（本地已有）" : "（未下载）").append('\n');
         sb.append("系统要求：").append(pkg.apiLabel(pkg.minApi)).append(" / ").append(pkg.apiLabel(pkg.targetApi)).append('\n');
         sb.append("模块：").append(pkg.moduleName).append("（").append(pkg.moduleType).append("）   入口：").append(pkg.mainElement).append('\n');
         sb.append("入口能力：").append(pkg.abilities.isEmpty() ? "-" : String.join("、", pkg.abilities)).append('\n');
@@ -573,13 +745,14 @@ public class MainActivity extends Activity {
         sb.append("权限：").append(pkg.permissions.isEmpty() ? "无" : String.join("、", pkg.permissions)).append('\n');
         sb.append("压缩包条目：").append(pkg.entryCount).append("  图片等资源：").append(pkg.mediaCount).append(" 项\n");
         sb.append("程序字节码：").append(pkg.abcInfo).append("  (").append(pkg.abcSize / 1024).append(" KB)\n");
+        sb.append("内部指纹：").append(pkg.internalFingerprint()).append('\n');
         Verdict v = pkg.computeVerdict();
         sb.append("判定：").append(v.code).append(" · ").append(v.level).append('\n');
         sb.append("建议动作：").append(v.advice).append('\n');
         sb.append("资源索引：").append(pkg.resourcesIndexSize / 1024).append(" KB\n");
         sb.append("SHA256：").append(pkg.sha.isEmpty() ? "-" : pkg.sha.substring(0, 24) + "…").append('\n');
-        sb.append("解包目录：").append(store.dir().getParentFile().getAbsolutePath()).append("/arkui-x/")
-                .append(pkg.moduleName);
+        sb.append("解包目录：").append(store.dir().getParentFile().getAbsolutePath())
+                .append("/").append(pkg.relPath());
         new AlertDialog.Builder(this).setTitle("应用详情").setMessage(sb.toString())
                 .setPositiveButton("关闭", null).show();
     }
@@ -610,8 +783,10 @@ public class MainActivity extends Activity {
 
     private File unpack(HapPackage pkg) throws Exception {
         File root = new File(getFilesDir(), "arkui-x");
-        // 对齐引擎约定：filesDir/arkui-x/<moduleName>/（第一层是模块名，不是包名）
-        File out = new File(root, pkg.moduleName);
+        // 通用隔离布局：外部 HAP 落在 arkui-x/ext/<包名-模块-短哈希>，
+        // 不同包/不同构建各自独立，不覆盖内置基准模块树与其他已导入 HAP。
+        File extRoot = new File(root, "ext");
+        File out = new File(extRoot, pkg.storageKey());
         if (out.exists()) {
             deleteTree(out);
         }

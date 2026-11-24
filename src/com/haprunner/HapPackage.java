@@ -48,6 +48,19 @@ public class HapPackage {
     public String error = "";
     /** stage / fa */
     public String model = "stage";
+    /** 包内条目最新修改时间（epoch ms，DOS 时间戳 2 秒精度），作为构建时间 */
+    public long buildTime = 0;
+    /** 编译 SDK / 发布类型 / 厂商 / 包类型 / 构建模式（module.json app 段） */
+    public String compileSdkVersion = "-";
+    public String compileSdkType = "-";
+    public String apiReleaseType = "-";
+    public String vendor = "-";
+    public String bundleType = "-";
+    public String buildMode = "-";
+    /** 模块段虚拟机标识（ark13.0.1.0 等） */
+    public String virtualMachine = "-";
+    /** SHA-256 前 12 位短指纹，用于同名包区分 */
+    public String shortSha = "-";
 
     public boolean isFaModel() {
         return "fa".equals(model);
@@ -121,6 +134,9 @@ public class HapPackage {
         if (!RuntimeProbe.isReady()) {
             return Verdict.byCode(Verdict.RUNTIME_MISSING, null);
         }
+        if (!RuntimeManager.isAvailable(requiredRuntimeVersion())) {
+            return Verdict.byCode(Verdict.RUNTIME_VERSION_MISSING, requiredRuntimeVersion());
+        }
         return Verdict.byCode(Verdict.OK, null);
     }
 
@@ -143,6 +159,7 @@ public class HapPackage {
         p.size = hap.length();
         try {
             p.sha = sha256(hap);
+            p.shortSha = p.sha.length() >= 12 ? p.sha.substring(0, 12) : p.sha;
             ZipFile zip = new ZipFile(hap);
             String moduleJson = null;
             String configJson = null;
@@ -153,6 +170,10 @@ public class HapPackage {
                 }
                 p.entryCount++;
                 String n = ze.getName();
+                long et = ze.getTime();
+                if (et > p.buildTime) {
+                    p.buildTime = et;
+                }
                 if (n.equals("module.json")) {
                     moduleJson = read(zip.getInputStream(ze));
                 } else if (n.equals("config.json")) {
@@ -207,10 +228,17 @@ public class HapPackage {
                 versionCode = app.optInt("versionCode", 0);
                 minApi = app.optInt("minAPIVersion", 0);
                 targetApi = app.optInt("targetAPIVersion", 0);
+                compileSdkVersion = app.optString("compileSdkVersion", "-");
+                compileSdkType = app.optString("compileSdkType", "-");
+                apiReleaseType = app.optString("apiReleaseType", "-");
+                vendor = app.optString("vendor", "-");
+                bundleType = app.optString("bundleType", "-");
+                buildMode = app.optString("buildMode", "-");
             }
             if (mod != null) {
                 moduleName = mod.optString("name", "entry");
                 moduleType = mod.optString("type", "-");
+                virtualMachine = mod.optString("virtualMachine", "-");
                 mainElement = mod.optString("mainElement", "-");
                 pagesProfile = mod.optString("pages", "-");
                 deviceTypes = mod.optJSONArray("deviceTypes") != null ? mod.optJSONArray("deviceTypes").toString() : "-";
@@ -317,8 +345,64 @@ public class HapPackage {
         return bundleName + ":" + moduleName + ":" + primaryAbility() + ":";
     }
 
+    /**
+     * 解包存储键：包名 + 模块名 + 短哈希前 8 位。
+     * 不同 HAP（含同名不同构建）落到各自隔离目录，互不覆盖，也不碰内置基准模块树。
+     */
+    public String storageKey() {
+        String h = shortSha.length() >= 8 ? shortSha.substring(0, 8) : shortSha;
+        return safeKey(bundleName) + "_" + safeKey(moduleName) + "_" + safeKey(h);
+    }
+
+    /** 解包目录相对 arkui-x 根的前缀（供引擎路径注入） */
+    public String relPath() {
+        return "arkui-x/ext/" + storageKey();
+    }
+
+    /** 该 HAP 所需的运行时版本号：优先编译 SDK 版本，缺失时回退虚拟机标识 */
+    public String requiredRuntimeVersion() {
+        if (compileSdkVersion != null && !compileSdkVersion.isEmpty() && !"-".equals(compileSdkVersion)) {
+            return compileSdkVersion;
+        }
+        return virtualMachine != null ? virtualMachine : "-";
+    }
+
+    private static String safeKey(String s) {
+        if (s == null || s.isEmpty()) {
+            return "unknown";
+        }
+        return s.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
     public String brief() {
-        return "v" + versionName + "  ·  " + (size / 1024) + " KB";
+        return versionLabel() + "  ·  " + (size / 1024) + " KB";
+    }
+
+    /** 版本显示：versionName (versionCode)，缺项时回退到可用字段 */
+    public String versionLabel() {
+        boolean hasName = versionName != null && !versionName.isEmpty() && !"-".equals(versionName);
+        if (!hasName && versionCode <= 0) {
+            return "-";
+        }
+        if (!hasName) {
+            return String.valueOf(versionCode);
+        }
+        return versionCode > 0 ? versionName + " (" + versionCode + ")" : versionName;
+    }
+
+    /** 构建时间（包内条目时间戳最大值），格式 yyyy-MM-dd HH:mm；无时间戳时返回 - */
+    public String buildTimeLabel() {
+        if (buildTime <= 0) {
+            return "-";
+        }
+        java.text.SimpleDateFormat sdf =
+                new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US);
+        return sdf.format(new java.util.Date(buildTime));
+    }
+
+    /** 内部指纹：字节码体积 + 条目数 + 短哈希，用于同名包区分 */
+    public String internalFingerprint() {
+        return "abc " + (abcSize / 1024) + " KB · " + entryCount + " 条目 · " + shortSha;
     }
 
     /** API 版本号显示：HarmonyOS 编码换算为 API level，否则按 Android API 显示 */
